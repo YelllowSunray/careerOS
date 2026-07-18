@@ -23,6 +23,7 @@ import type { Browser } from "playwright";
 import { saveJob, saveJobMatch, getKnownJobIdentityKeys } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
 import { listingIdentityKey, stableJobId } from "@/lib/job-search/identity";
+import { toGuestLinkedInJobUrl, isLinkedInHostname } from "@/lib/job-search/linkedin-urls";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { DiscoveredJobListing } from "@/agents/tools/job-discovery";
 import { searchPlaywrightJobBoards } from "@/agents/tools/job-discovery-social";
@@ -165,13 +166,18 @@ async function listingsToMatchedJobs(
 
         const fallback = listingToJobFallback(listing, text, ctx.userId, searchTerms);
         const jobId = stableJobId(ctx.userId, identityKey);
+        const rawApplicationUrl =
+          parsed?.applicationUrl || fallback.applicationUrl || listing.url;
+        const applicationUrl = isLinkedInHostname(rawApplicationUrl)
+          ? toGuestLinkedInJobUrl(rawApplicationUrl)
+          : rawApplicationUrl;
 
         const job: Job = {
           id: jobId,
           userId: ctx.userId,
           title: parsed?.title || fallback.title,
           company: parsed?.company || fallback.company,
-          applicationUrl: parsed?.applicationUrl || fallback.applicationUrl,
+          applicationUrl,
           source: listing.platform === "career_page" ? "career_page" : "job_board",
           sourcePlatform: listing.platform,
           location: parsed?.location || fallback.location,

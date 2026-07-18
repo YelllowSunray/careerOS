@@ -200,10 +200,26 @@ export default function ProfilePage() {
       <div className="mx-auto max-w-lg py-20 text-center">
         <h1 className="text-2xl font-semibold">Couldn’t load your profile</h1>
         <p className="mt-2 text-sm text-zinc-500">{profileLoadError}</p>
-        <p className="mt-3 text-sm text-zinc-500">
-          On Vercel, set <code className="rounded bg-zinc-100 px-1">FIREBASE_SERVICE_ACCOUNT_JSON</code>{" "}
-          (the full service-account JSON). Localhost uses a file path that isn’t available in production.
-        </p>
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-sm text-zinc-600">
+          <p className="font-medium text-zinc-900">Fix on Vercel</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4">
+            <li>
+              Set <code className="rounded bg-white px-1">FIREBASE_SERVICE_ACCOUNT_JSON</code> to
+              the service-account JSON (starts with <code className="rounded bg-white px-1">{"{"}</code>)
+              or its base64 form (starts with <code className="rounded bg-white px-1">ewog</code>) —
+              not an <code className="rounded bg-white px-1">sk_live_</code> key.
+            </li>
+            <li>Redeploy after changing env vars.</li>
+            <li>
+              Open <code className="rounded bg-white px-1">/api/health/firebase</code> — it should
+              return JSON like <code className="rounded bg-white px-1">{`{"ok":true}`}</code>.
+            </li>
+            <li>
+              If that URL shows a Vercel login/HTML page, disable Deployment Protection for this
+              project (or allow the bypass).
+            </li>
+          </ol>
+        </div>
         <Button className="mt-6" variant="secondary" onClick={() => {
           setLoading(true);
           loadData().finally(() => setLoading(false));

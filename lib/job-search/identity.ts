@@ -14,6 +14,10 @@ const TRACKING_PARAMS = [
   "trk",
   "refId",
   "trackingId",
+  "position",
+  "pageNum",
+  "eBP",
+  "originalSubdomain",
 ];
 
 export function extractIndeedJobKey(url: string): string | null {
@@ -28,9 +32,19 @@ export function extractIndeedJobKey(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * LinkedIn job IDs appear as:
+ * - /jobs/view/1234567890
+ * - /jobs/view/some-slug-at-company-1234567890
+ * - ?currentJobId=1234567890
+ */
 export function extractLinkedInJobId(url: string): string | null {
-  const viewMatch = url.match(/\/jobs\/view\/(\d+)/i);
-  if (viewMatch?.[1]) return viewMatch[1];
+  const viewNumeric = url.match(/\/jobs\/view\/(\d+)(?:\/|[?#]|$)/i);
+  if (viewNumeric?.[1]) return viewNumeric[1];
+
+  const viewSlug = url.match(/\/jobs\/view\/[^/?#]*?-(\d{6,})(?:\/|[?#]|$)/i);
+  if (viewSlug?.[1]) return viewSlug[1];
+
   const paramMatch = url.match(/[?&]currentJobId=(\d+)/i);
   return paramMatch?.[1] ?? null;
 }

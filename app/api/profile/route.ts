@@ -11,7 +11,9 @@ export async function GET(request: NextRequest) {
     return jsonOk(profile);
   } catch (e) {
     if (e instanceof AuthError) return jsonError(e.message, 401);
-    return jsonError("Failed to fetch profile", 500);
+    const message = e instanceof Error ? e.message : "Failed to fetch profile";
+    console.error("[Profile GET]", e);
+    return jsonError(message, 500);
   }
 }
 
