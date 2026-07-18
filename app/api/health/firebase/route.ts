@@ -1,35 +1,48 @@
-import { NextRequest } from "next/server";
-import { jsonOk, jsonError } from "@/lib/api/auth";
-import { getAdminAuth, getAdminFirestore } from "@/lib/firebase/admin";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /**
- * Lightweight production check for Firebase Admin wiring.
- * Does not expose secrets — only whether credentials work.
+ * Always returns JSON — even on failure — so we can debug Vercel credentials.
+ * Does not expose secrets.
  */
-export async function GET(_request: NextRequest) {
-  try {
-    const projectId =
-      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ??
-      "(missing NEXT_PUBLIC_FIREBASE_PROJECT_ID)";
+export async function GET() {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON ?? "";
+  const trimmed = raw.trim();
+  const base = {
+    ok: false as boolean,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? null,
+    hasServiceAccountEnv: trimmed.length > 0,
+    serviceAccountEnvLength: trimmed.length,
+    serviceAccountEnvPrefix: trimmed.slice(0, 16),
+  };
 
-    const hasInline = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim());
-    const hasPath = Boolean(
-      process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim() ||
-        process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim()
+  try {
+    if (!trimmed) {
+      return Response.json(
+        {
+          ...base,
+          error:
+            "FIREBASE_SERVICE_ACCOUNT_JSON is missing on this deployment",
+        },
+        { status: 500 }
+      );
+    }
+
+    const { getAdminAuth, getAdminFirestore } = await import(
+      "@/lib/firebase/admin"
     );
 
-    // Touch Auth + Firestore so credential / network failures surface here.
     getAdminAuth();
     await getAdminFirestore().collection("profiles").limit(1).get();
 
-    return jsonOk({
+    return Response.json({
+      ...base,
       ok: true,
-      projectId,
-      credentials: hasInline ? "FIREBASE_SERVICE_ACCOUNT_JSON" : hasPath ? "path" : "none",
+      credentials: "FIREBASE_SERVICE_ACCOUNT_JSON",
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Firebase check failed";
     console.error("[health/firebase]", e);
-    return jsonError(message, 500);
+    return Response.json({ ...base, error: message }, { status: 500 });
   }
 }

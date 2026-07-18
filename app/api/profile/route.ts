@@ -4,6 +4,9 @@ import { getProfile, saveProfile } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
 import type { UserProfile } from "@/lib/types";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
     const userId = await verifyAuth(request);
