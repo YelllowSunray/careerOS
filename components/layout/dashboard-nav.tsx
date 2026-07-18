@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
+import { isAdminEmail } from "@/lib/admin/config";
 import { cn } from "@/lib/utils/cn";
 import {
   Briefcase,
@@ -10,6 +11,7 @@ import {
   LayoutDashboard,
   LogOut,
   Settings,
+  Shield,
   User,
 } from "lucide-react";
 
@@ -22,7 +24,8 @@ const NAV = [
 
 export function DashboardNav() {
   const pathname = usePathname();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+  const showAdmin = isAdminEmail(user?.email);
 
   return (
     <aside className="flex w-64 flex-col border-r border-zinc-200 bg-white">
@@ -46,6 +49,20 @@ export function DashboardNav() {
             {label}
           </Link>
         ))}
+        {showAdmin && (
+          <Link
+            href="/admin"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              pathname === "/admin"
+                ? "bg-zinc-900 text-white"
+                : "text-zinc-600 hover:bg-zinc-100"
+            )}
+          >
+            <Shield className="h-4 w-4" />
+            Admin
+          </Link>
+        )}
       </nav>
       <div className="border-t border-zinc-200 p-4">
         <button

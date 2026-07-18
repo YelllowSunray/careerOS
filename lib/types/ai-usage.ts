@@ -20,6 +20,23 @@ export interface AiUsageRecord {
   byCategory?: Partial<Record<AiUsageCategory, AiUsageCategoryTotals>>;
 }
 
+export interface AiUsageAccountSummary extends AiUsageRecord {
+  email: string | null;
+  name: string | null;
+}
+
+export interface AiUsageAdminOverview {
+  accounts: AiUsageAccountSummary[];
+  totals: {
+    totalTokens: number;
+    promptTokens: number;
+    completionTokens: number;
+    requestCount: number;
+    estimatedCostUsd: number;
+    accountCount: number;
+  };
+}
+
 export interface AiUsageCall {
   operation: string;
   category?: AiUsageCategory;

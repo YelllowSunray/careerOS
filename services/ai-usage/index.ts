@@ -1,4 +1,4 @@
-import { getAdminFirestore } from "@/lib/firebase/admin";
+import { getAdminFirestore, getAdminAuth } from "@/lib/firebase/admin";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitize";
 import { nowIso } from "@/lib/utils/dates";
 import {
@@ -10,8 +10,12 @@ import type {
   AiUsageCategory,
   AiUsageCategoryTotals,
   AiUsageRecord,
+  AiUsageAdminOverview,
+  AiUsageAccountSummary,
   GeminiUsageMetadata,
 } from "@/lib/types/ai-usage";
+
+export type { AiUsageAdminOverview, AiUsageAccountSummary };
 
 const COLLECTION = "aiUsage";
 
@@ -109,4 +113,70 @@ export async function recordAiUsage(
 export async function getAiUsage(userId: string): Promise<AiUsageRecord | null> {
   const snap = await getAdminFirestore().collection(COLLECTION).doc(userId).get();
   return snap.exists ? (snap.data() as AiUsageRecord) : null;
+}
+
+export async function listAllAiUsage(): Promise<AiUsageAdminOverview> {
+  const db = getAdminFirestore();
+  const [usageSnap, profilesSnap] = await Promise.all([
+    db.collection(COLLECTION).get(),
+    db.collection("profiles").get(),
+  ]);
+
+  const profileByUserId = new Map<
+    string,
+    { email?: string; name?: string }
+  >();
+  for (const doc of profilesSnap.docs) {
+    const data = doc.data() as { email?: string; name?: string };
+    profileByUserId.set(doc.id, data);
+  }
+
+  const accounts: AiUsageAccountSummary[] = await Promise.all(
+    usageSnap.docs.map(async (doc) => {
+      const record = doc.data() as AiUsageRecord;
+      const profile = profileByUserId.get(doc.id);
+      let email = profile?.email ?? null;
+      let name = profile?.name ?? null;
+
+      if (!email) {
+        try {
+          const authUser = await getAdminAuth().getUser(doc.id);
+          email = authUser.email ?? null;
+          name = name ?? authUser.displayName ?? null;
+        } catch {
+          // Auth user may have been deleted
+        }
+      }
+
+      return {
+        ...record,
+        userId: record.userId ?? doc.id,
+        email,
+        name,
+      };
+    })
+  );
+
+  accounts.sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd);
+
+  const totals = accounts.reduce(
+    (acc, a) => {
+      acc.totalTokens += a.totalTokens ?? 0;
+      acc.promptTokens += a.promptTokens ?? 0;
+      acc.completionTokens += a.completionTokens ?? 0;
+      acc.requestCount += a.requestCount ?? 0;
+      acc.estimatedCostUsd += a.estimatedCostUsd ?? 0;
+      return acc;
+    },
+    {
+      totalTokens: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      requestCount: 0,
+      estimatedCostUsd: 0,
+      accountCount: accounts.length,
+    }
+  );
+
+  return { accounts, totals };
 }

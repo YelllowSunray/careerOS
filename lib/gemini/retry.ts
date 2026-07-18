@@ -1,9 +1,19 @@
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1500;
 
+export function formatGeminiError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
 function isRetryableError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /503|502|429|500|504|unavailable|overloaded|rate limit|resource exhausted|deadline exceeded|internal error/i.test(
+  const message = formatGeminiError(error);
+  return /503|502|429|500|504|unavailable|overloaded|rate limit|resource exhausted|deadline exceeded|internal error|ECONNRESET|ETIMEDOUT|fetch failed/i.test(
     message
   );
 }
@@ -30,7 +40,7 @@ export async function withGeminiRetry<T>(
       const waitMs = BASE_DELAY_MS * 2 ** attempt;
       console.warn(
         `[Gemini] ${label} failed (${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${waitMs}ms:`,
-        error instanceof Error ? error.message : error
+        formatGeminiError(error)
       );
       await geminiDelay(waitMs);
     }

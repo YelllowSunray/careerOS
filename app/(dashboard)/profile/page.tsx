@@ -77,21 +77,28 @@ export default function ProfilePage() {
   useEffect(() => {
     if (loading || !profile?.onboardingComplete) return;
     if (!profile.resume && profile.portfolioUrls.length === 0) return;
-    const hasRawResume = (resume?.rawText?.trim().length ?? 0) > 0;
-    if (hasRawResume && workflow?.status === "completed") return;
     if (isWorkflowActive(workflow)) return;
-    if (workflow?.status === "completed" && candidate) return;
+
+    const hasRawResume = (resume?.rawText?.trim().length ?? 0) > 0;
+    const summaryFailed = workflow?.steps?.some(
+      (s) => s.name === "candidate_profile" && s.status === "failed"
+    );
+    // Resume ingested and summary ok (or we already have a cached profile) — nothing to do.
+    if (hasRawResume && workflow?.status === "completed" && (!summaryFailed || candidate)) {
+      return;
+    }
+    if (workflow?.status === "completed" && candidate && !summaryFailed) return;
 
     apiFetch("/api/profile/process", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify(summaryFailed && !candidate ? { force: true } : {}),
     })
       .then((result) => {
         if (result?.workflow) logWorkflowToConsole(result.workflow, "Auto-start");
         return loadData();
       })
       .catch((e) => console.error("[Profile] auto-start processing failed:", e));
-  }, [loading, profile, candidate, workflow, apiFetch, loadData]);
+  }, [loading, profile, candidate, resume, workflow, apiFetch, loadData]);
 
   const isProcessing = isWorkflowActive(workflow);
 
@@ -199,9 +206,12 @@ export default function ProfilePage() {
   }
 
   const hasRawResume = (resume?.rawText?.trim().length ?? 0) > 0;
+  const summaryStepFailed = workflow?.steps?.some(
+    (s) => s.name === "candidate_profile" && s.status === "failed"
+  );
+  // Only warn when we still lack a usable candidate summary.
   const optionalSummaryFailed =
-    workflow?.status === "completed" &&
-    workflow?.steps?.some((s) => s.name === "candidate_profile" && s.status === "failed");
+    workflow?.status === "completed" && summaryStepFailed && !candidate;
   const skills = candidate?.skills?.length
     ? candidate.skills
     : resume?.extracted.skills ?? [];
@@ -232,8 +242,18 @@ export default function ProfilePage() {
 
       {optionalSummaryFailed && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Resume text was saved, but the optional AI summary step did not complete.
-          Job matching and applications still use your raw resume and portfolio.
+          <p>
+            Resume text was saved, but the optional AI summary step did not complete.
+            Job matching and applications still use your raw resume and portfolio.
+          </p>
+          <button
+            type="button"
+            onClick={handleReprocess}
+            disabled={reprocessing || isProcessing}
+            className="mt-2 font-medium underline underline-offset-2 hover:no-underline disabled:opacity-50"
+          >
+            Retry AI summary
+          </button>
         </div>
       )}
 

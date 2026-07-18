@@ -1,7 +1,13 @@
 import { NextRequest } from "next/server";
 import { getAdminAuth } from "@/lib/firebase/admin";
+import { isAdminEmail } from "@/lib/admin/config";
 
-export async function verifyAuth(request: NextRequest): Promise<string> {
+export interface AuthUser {
+  uid: string;
+  email: string | null;
+}
+
+export async function verifyAuthUser(request: NextRequest): Promise<AuthUser> {
   const header = request.headers.get("authorization");
   if (!header?.startsWith("Bearer ")) {
     throw new AuthError("Missing authorization token");
@@ -10,10 +16,26 @@ export async function verifyAuth(request: NextRequest): Promise<string> {
   const token = header.slice(7);
   try {
     const decoded = await getAdminAuth().verifyIdToken(token);
-    return decoded.uid;
+    return {
+      uid: decoded.uid,
+      email: decoded.email ?? null,
+    };
   } catch {
     throw new AuthError("Invalid authorization token");
   }
+}
+
+export async function verifyAuth(request: NextRequest): Promise<string> {
+  const user = await verifyAuthUser(request);
+  return user.uid;
+}
+
+export async function requireAdmin(request: NextRequest): Promise<AuthUser> {
+  const user = await verifyAuthUser(request);
+  if (!isAdminEmail(user.email)) {
+    throw new AuthError("Admin access required");
+  }
+  return user;
 }
 
 export class AuthError extends Error {

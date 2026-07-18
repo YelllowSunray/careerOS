@@ -369,21 +369,25 @@ export function normalizeCandidateSynthesis(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const o = raw as Record<string, unknown>;
 
+  const inferredRoles = o.inferredRoles ?? o.inferred_roles ?? o.roles;
+  const experienceLevel =
+    o.experienceLevel ?? o.experience_level ?? o.level ?? o.seniority;
+
   return {
     skills: coerceStringArray(o.skills),
-    technologies: coerceStringArray(o.technologies),
+    technologies: coerceStringArray(o.technologies ?? o.tech ?? o.tools),
     strengths: coerceStringArray(o.strengths),
     gaps: coerceStringArray(o.gaps),
-    experienceLevel: coerceExperienceLevel(o.experienceLevel),
-    inferredRoles: Array.isArray(o.inferredRoles)
-      ? o.inferredRoles
+    experienceLevel: coerceExperienceLevel(experienceLevel),
+    inferredRoles: Array.isArray(inferredRoles)
+      ? inferredRoles
           .map((r) => {
             const role = (r ?? {}) as Record<string, unknown>;
             return {
-              role: String(role.role ?? role.title ?? "").trim(),
+              role: String(role.role ?? role.title ?? role.name ?? "").trim(),
               confidence: Math.min(
                 100,
-                Math.max(0, coerceNumber(role.confidence, 70))
+                Math.max(0, coerceNumber(role.confidence ?? role.score, 70))
               ),
             };
           })
@@ -394,10 +398,12 @@ export function normalizeCandidateSynthesis(raw: unknown): unknown {
           const proj = (p ?? {}) as Record<string, unknown>;
           return {
             name: String(proj.name ?? proj.title ?? "Untitled project"),
-            description: String(proj.description ?? ""),
-            technologies: coerceStringArray(proj.technologies),
+            description: String(proj.description ?? proj.summary ?? ""),
+            technologies: coerceStringArray(
+              proj.technologies ?? proj.tech ?? proj.tools
+            ),
             links: coerceStringArray(proj.links ?? proj.url ?? proj.urls),
-            source: coerceSource(proj.source),
+            source: coerceSource(proj.source ?? proj.origin),
           };
         })
       : [],

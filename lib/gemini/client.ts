@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { z } from "zod";
 import { recordAiUsage } from "@/services/ai-usage";
-import { withGeminiRetry } from "@/lib/gemini/retry";
+import { withGeminiRetry, formatGeminiError } from "@/lib/gemini/retry";
 
 const MODEL = "gemini-2.5-flash";
 
@@ -102,11 +102,15 @@ export async function generateStructured<T>(
     if (!validated.success) {
       console.error("[Gemini] Schema validation failed. Raw response:", parsed);
       console.error("[Gemini] Validation errors:", validated.error.flatten());
-      throw validated.error;
+      throw new Error(
+        `Schema validation failed: ${validated.error.issues
+          .slice(0, 3)
+          .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+          .join("; ")}`
+      );
     }
     return validated.data;
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Gemini request failed";
-    throw new Error(`AI extraction failed: ${message}`);
+    throw new Error(`AI extraction failed: ${formatGeminiError(e)}`);
   }
 }
