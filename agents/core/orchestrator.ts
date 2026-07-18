@@ -26,6 +26,10 @@ import {
 } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
 import { isWorkflowPaused, WorkflowPausedError } from "@/lib/workflows/pause";
+import {
+  markFindJobsDone,
+  markFindJobsLive,
+} from "@/lib/workflows/live";
 import type { Workflow, WorkflowStep, JobMatch } from "@/lib/types";
 
 function createWorkflow(
@@ -237,8 +241,14 @@ export class WorkflowOrchestrator {
     workflowId: string,
     fitScoreThreshold = 85
   ): Promise<Workflow> {
+    // Route also marks live; keep both so direct findJobs() calls register.
+    markFindJobsLive(workflowId);
+
     const workflow = await getWorkflow(workflowId);
-    if (!workflow) throw new Error("Workflow not found");
+    if (!workflow) {
+      markFindJobsDone(workflowId);
+      throw new Error("Workflow not found");
+    }
 
     const ctx = createContext(userId);
     const ROUND_DELAY_MS = 20_000;
@@ -273,6 +283,15 @@ export class WorkflowOrchestrator {
       while (!(await isWorkflowPaused(workflowId))) {
         round++;
         console.log(`[Find jobs] Starting search round ${round}`);
+        workflow.config = {
+          ...workflow.config,
+          fitScoreThreshold,
+          round,
+          evaluatedListingKeys,
+          lastRoundDiscovered: -1, // in progress
+          searchingRound: round,
+        };
+        await this.touchFindJobs(workflow, { config: workflow.config });
 
         const discovery = await jobDiscoveryAgent.execute(
           {
@@ -309,6 +328,7 @@ export class WorkflowOrchestrator {
           round,
           evaluatedListingKeys,
           lastRoundDiscovered: discovered,
+          searchingRound: round,
         };
 
         await this.touchFindJobs(workflow, {
@@ -344,6 +364,8 @@ export class WorkflowOrchestrator {
         error: workflow.error,
         completedAt: workflow.completedAt,
       });
+    } finally {
+      markFindJobsDone(workflowId);
     }
 
     return (await getWorkflow(workflowId)) ?? workflow;

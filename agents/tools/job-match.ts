@@ -7,23 +7,20 @@ import { inferExperienceLevelFromContext, seniorityLabel } from "@/lib/job-searc
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { Job } from "@/lib/types";
 
-const matchSchema = z.preprocess(
-  (raw) => normalizeJobMatch(raw),
-  z.object({
-    fitScore: z.number(),
-    strengths: z.array(z.string()),
-    missingSkills: z.array(
-      z.object({
-        skill: z.string(),
-        isHardRequirement: z.boolean(),
-      })
-    ),
-    applyRecommendation: z.boolean(),
-    reasoning: z.string(),
-    preferenceAlignment: z.string().optional(),
-    preferencesMatch: z.boolean().optional(),
-  })
-);
+const matchSchema = z.object({
+  fitScore: z.number(),
+  strengths: z.array(z.string()),
+  missingSkills: z.array(
+    z.object({
+      skill: z.string(),
+      isHardRequirement: z.boolean(),
+    })
+  ),
+  applyRecommendation: z.boolean(),
+  reasoning: z.string(),
+  preferenceAlignment: z.string().optional(),
+  preferencesMatch: z.boolean().optional(),
+});
 
 export type JobMatchResult = z.infer<typeof matchSchema>;
 
@@ -105,7 +102,11 @@ ${postingText.slice(0, 14000)}`;
   return generateStructured(
     buildHolisticMatchPrompt(context, jobBlock),
     matchSchema,
-    { userId: context.userId, operation: "listing_match" }
+    {
+      userId: context.userId,
+      operation: "listing_match",
+      coerce: normalizeJobMatch,
+    }
   );
 }
 
@@ -121,6 +122,10 @@ export async function matchJobToCandidate(job: Job, context: CandidateContext) {
   return generateStructured(
     buildHolisticMatchPrompt(context, jobBlock),
     matchSchema,
-    { userId: context.userId, operation: "job_match" }
+    {
+      userId: context.userId,
+      operation: "job_match",
+      coerce: normalizeJobMatch,
+    }
   );
 }

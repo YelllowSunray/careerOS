@@ -1,4 +1,5 @@
 import type { Workflow } from "@/lib/types";
+import { isFindJobsLive } from "@/lib/workflows/live";
 
 export const WORKFLOW_STALE_MS = 10 * 60 * 1000; // 10 minutes
 /** Continuous job search may run for hours; only stale if idle this long. */
@@ -7,6 +8,13 @@ export const FIND_JOBS_IDLE_STALE_MS = 45 * 60 * 1000; // 45 minutes without act
 function activityTimestamp(workflow: Workflow): number {
   const raw = workflow.lastActivityAt ?? workflow.startedAt;
   return new Date(raw).getTime();
+}
+
+/** Firestore says running but this Node process is not executing the loop. */
+export function isOrphanedFindJobs(workflow: Workflow | null): boolean {
+  if (!workflow || workflow.type !== "find_jobs") return false;
+  if (workflow.status !== "running") return false;
+  return !isFindJobsLive(workflow.id);
 }
 
 export function isWorkflowStale(workflow: Workflow | null): boolean {

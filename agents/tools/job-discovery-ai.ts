@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { generateStructured } from "@/lib/gemini/client";
-import { normalizeJobListings } from "@/lib/gemini/coerce";
+import {
+  normalizeJobListings,
+  normalizeListingValidation,
+  normalizeRelevanceBatch,
+} from "@/lib/gemini/coerce";
 import { isBlockedPageText } from "./html";
 import { logBoardError, logBoardInfo, logBoardWarn } from "./job-board-log";
 import { formatContextForPrompt } from "@/lib/candidate/context";
@@ -58,6 +62,14 @@ export async function filterListingsForCandidate(
         `Score whether each job listing is a plausible match for this candidate.
 Use the candidate's resume, portfolio, skills, and experience level.
 
+Return JSON object (not a bare array) with this exact shape:
+{
+  "results": [
+    { "index": 0, "relevant": true, "relevanceScore": 70 }
+  ]
+}
+Use the listing index numbers from LISTINGS below. Include one result per listing.
+
 REJECT (relevant=false, score<40):
 - Completely unrelated fields: sales, accounting, office admin, QA rater, medical, legal unless candidate has that background
 - Roles clearly above target level ${seniorityLabel(level)} (e.g. Senior/Lead/Principal/Staff/VP/Director/Head of when target is junior or mid)
@@ -79,16 +91,31 @@ ${candidateBlock}
 LISTINGS (use index numbers):
 ${listingBlock}`,
         relevanceBatchSchema,
-        { userId: context.userId, operation: "listing_relevance" }
+        {
+          userId: context.userId,
+          operation: "listing_relevance",
+          coerce: normalizeRelevanceBatch,
+        }
       );
 
+      const scoredIndexes = new Set<number>();
       for (const r of result.results) {
+        scoredIndexes.add(r.index);
         if (r.relevant && r.relevanceScore >= minScore && batch[r.index]) {
           kept.push(batch[r.index]);
         }
       }
+      // Indexes Gemini omitted — keep for full evaluation (don't silently discard).
+      for (let i = 0; i < batch.length; i++) {
+        if (!scoredIndexes.has(i)) kept.push(batch[i]);
+      }
     } catch (e) {
-      console.warn("[Listing relevance] AI filter failed, skipping batch");
+      console.warn(
+        "[Listing relevance] AI filter failed, keeping batch unfiltered:",
+        e instanceof Error ? e.message : e
+      );
+      // Don't stall discovery — evaluate these listings in the next stage.
+      kept.push(...batch);
     }
   }
 
@@ -135,7 +162,11 @@ Platform: ${listing.platform}
 CONTENT:
 ${postingText.slice(0, 8000)}`,
         listingValidSchema,
-        { userId, operation: "listing_validate" }
+        {
+          userId,
+          operation: "listing_validate",
+          coerce: normalizeListingValidation,
+        }
       );
       if (platform) {
         logBoardInfo(platform, `AI listing validation`, {

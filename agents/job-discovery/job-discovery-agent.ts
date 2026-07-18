@@ -304,6 +304,12 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
         if (workflowId && (await isWorkflowPaused(workflowId))) {
           return { success: true, data: [], paused: true };
         }
+        // LinkedIn pages ~25 results; Indeed ~10. Advance both each round so we
+        // don't re-score the same first page forever.
+        const pageOffset = Math.max(0, (round - 1) * 25);
+        console.log(
+          `[Job discovery] Round ${round}: board pagination offset=${pageOffset}`
+        );
         const batches = await Promise.all(
           searchTerms.map((query) =>
             searchPlaywrightJobBoards(
@@ -314,6 +320,7 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
                 preferredCountries: input.context.profile.preferredCountries,
                 workPreference: input.context.profile.workPreference,
                 experienceLevel: searchPlan.inferredLevel,
+                start: pageOffset,
               }
             )
           )

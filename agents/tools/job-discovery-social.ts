@@ -262,14 +262,15 @@ async function searchLinkedInGuestApi(
   query: string,
   location: string,
   userId?: string,
-  experienceLevel?: ExperienceLevel
+  experienceLevel?: ExperienceLevel,
+  start = 0
 ): Promise<DiscoveredJobListing[]> {
   const expFilter = experienceLevel
     ? linkedInExperienceFilter(experienceLevel)
     : "";
-  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent(location)}&start=0${expFilter}`;
+  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent(location)}&start=${Math.max(0, start)}${expFilter}&sortBy=DD`;
   try {
-    logBoardInfo("linkedin", `Guest API request`, { url, query, location });
+    logBoardInfo("linkedin", `Guest API request`, { url, query, location, start });
     const res = await fetch(url, {
       headers: {
         "User-Agent": BROWSER_UA,
@@ -298,6 +299,7 @@ async function searchLinkedInGuestApi(
 
     logBoardInfo("linkedin", `Guest API response`, {
       query,
+      start,
       htmlChars: html.length,
       textChars: text.length,
       linkCount: links.length,
@@ -314,6 +316,7 @@ async function searchLinkedInGuestApi(
 
     logBoardInfo("linkedin", `Guest API extracted listings`, {
       query,
+      start,
       listings: listings.length,
     });
     return listings;
@@ -331,12 +334,16 @@ export async function searchLinkedInJobs(
     location?: string;
     workPreference?: string;
     experienceLevel?: ExperienceLevel;
+    /** Pagination offset into LinkedIn results (0, 25, 50, …). */
+    start?: number;
   }
 ): Promise<DiscoveredJobListing[]> {
   const location = options?.location ?? "Worldwide";
+  const start = Math.max(0, options?.start ?? 0);
   logBoardInfo("linkedin", `Search start`, {
     query,
     location,
+    start,
     workPreference: options?.workPreference ?? "any",
     experienceLevel: options?.experienceLevel ?? "unspecified",
   });
@@ -346,11 +353,13 @@ export async function searchLinkedInJobs(
       query,
       location,
       userId,
-      options?.experienceLevel
+      options?.experienceLevel,
+      start
     );
     if (guest.length >= 3) {
       logBoardInfo("linkedin", `Using guest API results`, {
         query,
+        start,
         listings: guest.length,
       });
       return guest;
@@ -360,9 +369,10 @@ export async function searchLinkedInJobs(
     const expFilter = options?.experienceLevel
       ? linkedInExperienceFilter(options.experienceLevel)
       : "";
-    const searchUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent(location)}${remoteFilter}${expFilter}`;
+    const searchUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent(location)}&start=${start}${remoteFilter}${expFilter}&sortBy=DD`;
     logBoardInfo("linkedin", `Guest API insufficient (${guest.length}), Playwright fallback`, {
       searchUrl,
+      start,
     });
 
     const browser = await chromium.launch({ headless: true });
@@ -379,6 +389,7 @@ export async function searchLinkedInJobs(
       const combined = dedupeByUrl([...guest, ...scraped]);
       logBoardInfo("linkedin", `Search complete`, {
         query,
+        start,
         guest: guest.length,
         playwright: scraped.length,
         total: combined.length,
@@ -401,14 +412,21 @@ export async function searchIndeedJobs(
   query: string,
   userId?: string,
   preferredCountries: string[] = [],
-  workPreference = "any"
+  workPreference = "any",
+  start = 0
 ): Promise<DiscoveredJobListing[]> {
-  const searchUrl = buildIndeedSearchUrl(query, preferredCountries, workPreference);
+  const searchUrl = buildIndeedSearchUrl(
+    query,
+    preferredCountries,
+    workPreference,
+    start
+  );
   const locale = searchUrl.includes("nl.indeed") ? "nl-NL" : "en-US";
 
   logBoardInfo("indeed", `Search start`, {
     query,
     searchUrl,
+    start,
     locale,
     countries: preferredCountries,
     workPreference,
@@ -446,6 +464,7 @@ export async function searchIndeedJobs(
     const diagnostics = await getPageDiagnostics(page);
     logBoardInfo("indeed", `Page diagnostics`, {
       query,
+      start,
       selectorFound,
       ...diagnostics,
     });
@@ -459,6 +478,7 @@ export async function searchIndeedJobs(
     if (domListings.length > 0) {
       logBoardInfo("indeed", `DOM extraction success`, {
         query,
+        start,
         listings: domListings.length,
         sample: domListings.slice(0, 2).map((j) => j.title),
       });
@@ -475,6 +495,7 @@ export async function searchIndeedJobs(
     );
     logBoardInfo("indeed", `Search complete`, {
       query,
+      start,
       dom: 0,
       ai: aiListings.length,
       total: aiListings.length,
@@ -508,16 +529,20 @@ export async function searchPlaywrightJobBoards(
     preferredCountries: string[];
     workPreference: string;
     experienceLevel?: ExperienceLevel;
+    /** Result offset for pagination across continuous-search rounds. */
+    start?: number;
   }
 ): Promise<DiscoveredJobListing[]> {
   const location = resolveLinkedInLocation(
     profile.preferredCountries,
     profile.workPreference
   );
+  const start = Math.max(0, profile.start ?? 0);
 
   logBoardInfo("linkedin", `Batch start for "${query}"`, {
     boards,
     location,
+    start,
     countries: profile.preferredCountries,
     experienceLevel: profile.experienceLevel ?? "unspecified",
   });
@@ -531,6 +556,7 @@ export async function searchPlaywrightJobBoards(
           location,
           workPreference: profile.workPreference,
           experienceLevel: profile.experienceLevel,
+          start,
         })
       )
     );
@@ -543,7 +569,8 @@ export async function searchPlaywrightJobBoards(
           query,
           userId,
           profile.preferredCountries,
-          profile.workPreference
+          profile.workPreference,
+          start
         )
       )
     );
@@ -555,7 +582,7 @@ export async function searchPlaywrightJobBoards(
     linkedin: combined.filter((l) => l.platform === "linkedin").length,
     indeed: combined.filter((l) => l.platform === "indeed").length,
   };
-  logBoardInfo("linkedin", `Batch complete for "${query}"`, byPlatform);
+  logBoardInfo("linkedin", `Batch complete for "${query}"`, { ...byPlatform, start });
   return combined;
 }
 

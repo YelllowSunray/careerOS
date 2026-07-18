@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { generateStructured } from "@/lib/gemini/client";
+import { normalizeTailoredSearchPlan } from "@/lib/gemini/coerce";
 import {
   formatContextForPrompt,
   getTopInferredRolesFromContext,
@@ -163,10 +164,21 @@ Seed roles (adapt, do not copy verbatim if too narrow): ${seedRoles.join(", ") |
 Heuristic level hint: ${heuristicLevel}
 ${jobPrefs ? `Job preferences: ${jobPrefs}` : ""}
 
+Return JSON with this exact shape:
+{
+  "inferredExperienceLevel": "mid",
+  "searchQueries": ["query one", "query two", "query three"],
+  "rationale": "short explanation"
+}
+
 CANDIDATE:
 ${candidateBlock}`,
       tailoredSearchSchema,
-      { userId: context.userId, operation: "job_search_queries" }
+      {
+        userId: context.userId,
+        operation: "job_search_queries",
+        coerce: normalizeTailoredSearchPlan,
+      }
     );
 
     const queries = result.searchQueries

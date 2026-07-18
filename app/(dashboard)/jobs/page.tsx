@@ -35,7 +35,16 @@ function formatJobSource(job: Job): string {
 function activeStepLabel(workflow: Workflow | null): string {
   if (!workflow) return "Starting…";
   const round = Number(workflow.config?.round ?? 0);
-  if (round > 0) return `Round ${round} — scanning boards`;
+  const lastNew = Number(workflow.config?.lastRoundDiscovered ?? 0);
+  if (round > 0) {
+    if (lastNew < 0) {
+      return `Round ${round} — scanning boards (deeper pages)…`;
+    }
+    if (lastNew === 0) {
+      return `Round ${round} found no new roles — paging deeper…`;
+    }
+    return `Round ${round} saved ${lastNew} new · continuing…`;
+  }
   const running = workflow.steps.find((s) => s.status === "running");
   if (running) {
     return running.name.replace(/_/g, " ");
@@ -103,7 +112,7 @@ export default function JobsPage() {
     if (!finding) return;
     const interval = setInterval(() => {
       load();
-    }, 3000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [finding, load]);
 
@@ -302,6 +311,12 @@ export default function JobsPage() {
               {jobs.length > 0 && ` · ${jobs.length} matched so far`}
             </p>
           </div>
+        </div>
+      )}
+
+      {workflow?.status === "failed" && !finding && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          {workflow.error ?? "Job search stopped."} Click Find Jobs to start again.
         </div>
       )}
 

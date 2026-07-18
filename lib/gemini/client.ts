@@ -8,6 +8,8 @@ const MODEL = "gemini-2.5-flash";
 export interface GeminiOptions {
   userId?: string;
   operation?: string;
+  /** Normalize Gemini's free-form JSON before Zod validation (snake_case, bare arrays, etc.). */
+  coerce?: (raw: unknown) => unknown;
 }
 
 function getClient(): GoogleGenerativeAI {
@@ -98,9 +100,13 @@ export async function generateStructured<T>(
     await trackUsage(options, result.response);
     const text = result.response.text();
     const parsed = parseJsonResponse(text);
-    const validated = schema.safeParse(parsed);
+    const candidate = options?.coerce ? options.coerce(parsed) : parsed;
+    const validated = schema.safeParse(candidate);
     if (!validated.success) {
       console.error("[Gemini] Schema validation failed. Raw response:", parsed);
+      if (options?.coerce) {
+        console.error("[Gemini] After coerce:", candidate);
+      }
       console.error("[Gemini] Validation errors:", validated.error.flatten());
       throw new Error(
         `Schema validation failed: ${validated.error.issues

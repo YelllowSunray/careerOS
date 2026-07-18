@@ -261,8 +261,9 @@ function coerceMissingSkills(
 }
 
 export function normalizeJobMatch(raw: unknown): unknown {
-  if (!raw || typeof raw !== "object") return raw;
-  const o = raw as Record<string, unknown>;
+  const unwrapped = Array.isArray(raw) ? raw[0] : raw;
+  if (!unwrapped || typeof unwrapped !== "object") return raw;
+  const o = unwrapped as Record<string, unknown>;
 
   const details =
     o.matchDetails && typeof o.matchDetails === "object"
@@ -271,7 +272,17 @@ export function normalizeJobMatch(raw: unknown): unknown {
 
   const fitScore = Math.min(
     100,
-    Math.max(0, coerceNumber(o.fitScore ?? o.score ?? o.matchScore, 0))
+    Math.max(
+      0,
+      coerceNumber(
+        o.fitScore ??
+          o.fit_score ??
+          o.match_score ??
+          o.matchScore ??
+          o.score,
+        0
+      )
+    )
   );
 
   const strengths = coerceStringArray(
@@ -293,6 +304,8 @@ export function normalizeJobMatch(raw: unknown): unknown {
       o.match_reason ??
       o.explanation ??
       o.summary ??
+      o.feedback ??
+      o.reason ??
       (typeof details?.seniorityAlignment === "string"
         ? details.seniorityAlignment
         : "")
@@ -407,5 +420,104 @@ export function normalizeCandidateSynthesis(raw: unknown): unknown {
           };
         })
       : [],
+  };
+}
+
+/** Gemini often returns a bare array, or snake_case / id/score field names. */
+export function normalizeRelevanceBatch(raw: unknown): unknown {
+  const rows = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object"
+      ? ((raw as Record<string, unknown>).results ??
+        (raw as Record<string, unknown>).listings ??
+        (raw as Record<string, unknown>).items ??
+        (raw as Record<string, unknown>).jobs ??
+        [])
+      : [];
+
+  if (!Array.isArray(rows)) {
+    return { results: [] };
+  }
+
+  return {
+    results: rows.map((row, i) => {
+      const r = (row ?? {}) as Record<string, unknown>;
+      const score = coerceNumber(
+        r.relevanceScore ??
+          r.relevance_score ??
+          r.match_score ??
+          r.matchScore ??
+          r.score ??
+          r.fitScore ??
+          r.fit_score,
+        0
+      );
+      let relevant = r.relevant ?? r.relevance ?? r.is_relevant ?? r.isRelevant;
+      if (typeof relevant === "string") {
+        const s = relevant.toLowerCase().trim();
+        relevant = s === "true" || s === "yes" || s === "relevant";
+      }
+      if (typeof relevant !== "boolean") {
+        relevant = score >= 55;
+      }
+      return {
+        index: coerceNumber(
+          r.index ?? r.id ?? r.job_id ?? r.jobId ?? r.listing_id ?? r.listingId,
+          i
+        ),
+        relevant: Boolean(relevant),
+        relevanceScore: Math.min(100, Math.max(0, score)),
+      };
+    }),
+  };
+}
+
+/** Gemini often omits reason or uses snake_case for listing validation. */
+export function normalizeListingValidation(raw: unknown): unknown {
+  const o = Array.isArray(raw)
+    ? ((raw[0] ?? {}) as Record<string, unknown>)
+    : raw && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+  let isJobPosting = o.isJobPosting ?? o.is_job_posting ?? o.valid ?? o.isValid;
+  if (typeof isJobPosting === "string") {
+    const s = isJobPosting.toLowerCase().trim();
+    isJobPosting = s === "true" || s === "yes";
+  }
+  if (typeof isJobPosting !== "boolean") {
+    isJobPosting = true;
+  }
+  const reason = String(
+    o.reason ?? o.explanation ?? o.feedback ?? o.message ?? ""
+  ).trim();
+  return {
+    isJobPosting: Boolean(isJobPosting),
+    reason:
+      reason ||
+      (isJobPosting ? "Looks like a job posting" : "Does not look like a job posting"),
+  };
+}
+
+/** Gemini often returns experience_level / search_queries instead of camelCase. */
+export function normalizeTailoredSearchPlan(raw: unknown): unknown {
+  const o = Array.isArray(raw)
+    ? ((raw[0] ?? {}) as Record<string, unknown>)
+    : raw && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+  const queries =
+    o.searchQueries ?? o.search_queries ?? o.queries ?? o.query;
+  const rationale = String(
+    o.rationale ?? o.reason ?? o.explanation ?? o.search_rationale ?? ""
+  ).trim();
+  return {
+    inferredExperienceLevel: coerceExperienceLevel(
+      o.inferredExperienceLevel ??
+        o.inferred_experience_level ??
+        o.experienceLevel ??
+        o.experience_level
+    ),
+    searchQueries: coerceStringArray(queries),
+    rationale: rationale || "AI-tailored search plan",
   };
 }

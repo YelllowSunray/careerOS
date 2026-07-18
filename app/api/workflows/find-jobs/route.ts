@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import { verifyAuth, jsonError, jsonOk, AuthError } from "@/lib/api/auth";
 import { orchestrator } from "@/agents/core/orchestrator";
-import { getLatestWorkflow, getProfile } from "@/services/firestore";
+import { getLatestWorkflow, getProfile, updateWorkflow } from "@/services/firestore";
+import { isOrphanedFindJobs, markFindJobsDone, markFindJobsLive } from "@/lib/workflows/live";
 import { isWorkflowStale } from "@/lib/workflows/stale";
+import { nowIso } from "@/lib/utils/dates";
 
 export const maxDuration = 300;
 
@@ -16,20 +18,40 @@ export async function POST(request: NextRequest) {
 
     const existing = await getLatestWorkflow(userId, "find_jobs");
     if (existing?.status === "running" && !isWorkflowStale(existing)) {
-      return jsonOk({
-        workflowId: existing.id,
-        status: "running",
-        workflow: existing,
+      if (!isOrphanedFindJobs(existing)) {
+        return jsonOk({
+          workflowId: existing.id,
+          status: "running",
+          workflow: existing,
+        });
+      }
+      await updateWorkflow(existing.id, {
+        status: "failed",
+        error:
+          "Search stopped when the server restarted. Starting a new search.",
+        completedAt: nowIso(),
       });
+      console.warn(
+        `[Find jobs] Replacing orphaned workflow ${existing.id} with a new run`
+      );
     }
 
     const workflow = await orchestrator.startFindJobs(userId, threshold);
+    markFindJobsLive(workflow.id);
 
     // Fire-and-forget so continuous search is not capped by route maxDuration /
     // after(). Pause is the only intentional stop.
-    void orchestrator.runFindJobs(userId, workflow.id, threshold).catch((e) => {
-      console.error(`[Find jobs] Background workflow failed (${workflow.id}):`, e);
-    });
+    void orchestrator
+      .runFindJobs(userId, workflow.id, threshold)
+      .catch((e) => {
+        console.error(
+          `[Find jobs] Background workflow failed (${workflow.id}):`,
+          e
+        );
+      })
+      .finally(() => {
+        markFindJobsDone(workflow.id);
+      });
 
     return jsonOk({
       workflowId: workflow.id,

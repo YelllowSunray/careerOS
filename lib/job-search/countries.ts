@@ -126,11 +126,13 @@ export function indeedRemoteFilter(workPreference: string): string {
 export function buildIndeedSearchUrl(
   query: string,
   countries: string[],
-  workPreference: string
+  workPreference: string,
+  start = 0
 ): string {
   const domain = resolveIndeedDomain(countries);
   const location = resolveIndeedLocation(countries);
   const locationParam = location ? `&l=${encodeURIComponent(location)}` : "";
   const remoteParam = indeedRemoteFilter(workPreference);
-  return `https://${domain}.indeed.com/jobs?q=${encodeURIComponent(query)}${locationParam}${remoteParam}&fromage=14`;
+  const startParam = start > 0 ? `&start=${start}` : "";
+  return `https://${domain}.indeed.com/jobs?q=${encodeURIComponent(query)}${locationParam}${remoteParam}${startParam}&fromage=14`;
 }
