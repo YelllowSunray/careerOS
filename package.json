@@ -15,6 +15,7 @@
     "clsx": "^2.1.1",
     "firebase": "^12.14.0",
     "firebase-admin": "^14.0.0",
+    "jose": "4.15.9",
     "lucide-react": "^1.18.0",
     "mammoth": "^1.12.0",
     "next": "16.2.9",
@@ -26,6 +27,9 @@
     "tailwind-merge": "^3.6.0",
     "word-extractor": "^1.0.4",
     "zod": "^4.4.3"
+  },
+  "overrides": {
+    "jose": "4.15.9"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
