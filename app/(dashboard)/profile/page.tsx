@@ -25,6 +25,7 @@ export default function ProfilePage() {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [aiUsage, setAiUsage] = useState<AiUsageRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const [uploadingCoverLetter, setUploadingCoverLetter] = useState(false);
   const [deletingCoverLetterId, setDeletingCoverLetterId] = useState<string | null>(null);
@@ -34,9 +35,12 @@ export default function ProfilePage() {
   };
 
   const loadData = useCallback(async () => {
+    setProfileLoadError(null);
     const [p, c, r, w, u] = await Promise.all([
       apiFetch("/api/profile").catch((e) => {
+        const message = e instanceof Error ? e.message : "Failed to load profile";
         logError("load profile", e);
+        setProfileLoadError(message);
         return null;
       }),
       apiFetch("/api/data?type=candidate").catch((e) => {
@@ -189,6 +193,25 @@ export default function ProfilePage() {
 
   if (loading) {
     return <div className="text-zinc-500">Loading profile...</div>;
+  }
+
+  if (profileLoadError) {
+    return (
+      <div className="mx-auto max-w-lg py-20 text-center">
+        <h1 className="text-2xl font-semibold">Couldn’t load your profile</h1>
+        <p className="mt-2 text-sm text-zinc-500">{profileLoadError}</p>
+        <p className="mt-3 text-sm text-zinc-500">
+          On Vercel, set <code className="rounded bg-zinc-100 px-1">FIREBASE_SERVICE_ACCOUNT_JSON</code>{" "}
+          (the full service-account JSON). Localhost uses a file path that isn’t available in production.
+        </p>
+        <Button className="mt-6" variant="secondary" onClick={() => {
+          setLoading(true);
+          loadData().finally(() => setLoading(false));
+        }}>
+          Retry
+        </Button>
+      </div>
+    );
   }
 
   if (!profile?.onboardingComplete) {

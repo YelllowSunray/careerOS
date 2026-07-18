@@ -31,17 +31,16 @@ function getAdminApp(): App {
   }
 
   const serviceAccount = loadServiceAccount();
-  if (serviceAccount) {
-    adminApp = initializeApp({
-      credential: cert(serviceAccount),
-      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    });
-  } else {
-    adminApp = initializeApp({
-      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    });
+  if (!serviceAccount) {
+    throw new Error(
+      "Firebase Admin credentials missing. Set FIREBASE_SERVICE_ACCOUNT_JSON on Vercel (or FIREBASE_SERVICE_ACCOUNT_PATH locally)."
+    );
   }
+
+  adminApp = initializeApp({
+    credential: cert(serviceAccount),
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  });
 
   return adminApp;
 }
