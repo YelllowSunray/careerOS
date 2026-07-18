@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    match /profiles/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /resumes/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+
+    match /portfolioSites/{siteId} {
+      allow read: if isOwner(resource.data.userId);
+      allow write: if false;
+    }
+
+    match /candidateProfiles/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+
+    match /jobs/{jobId} {
+      allow read: if isOwner(resource.data.userId);
+      allow write: if false;
+    }
+
+    match /jobMatches/{matchId} {
+      allow read: if isOwner(resource.data.userId);
+      allow write: if false;
+    }
+
+    match /applications/{appId} {
+      allow read: if isOwner(resource.data.userId);
+      allow update: if isOwner(resource.data.userId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'materials', 'updatedAt']);
+      allow create, delete: if false;
+    }
+
+    match /workflows/{workflowId} {
+      allow read: if isOwner(resource.data.userId);
+      allow write: if false;
+    }
+
+    match /browserSessions/{sessionId} {
+      allow read: if isOwner(resource.data.userId);
+      allow write: if false;
+    }
+
+    match /aiUsage/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+  }
+}

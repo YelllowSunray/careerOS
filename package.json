@@ -6,21 +6,37 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "worker:browser": "npx tsx workers/browser-agent/index.ts"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "cheerio": "^1.2.0",
+    "clsx": "^2.1.1",
+    "firebase": "^12.14.0",
+    "firebase-admin": "^14.0.0",
+    "lucide-react": "^1.18.0",
+    "mammoth": "^1.12.0",
     "next": "16.2.9",
+    "pdf-lib": "^1.17.1",
+    "pdf-parse": "^2.4.5",
+    "playwright": "^1.61.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "tailwind-merge": "^3.6.0",
+    "word-extractor": "^1.0.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
+    "tsx": "^4.22.4",
     "typescript": "^5"
   }
 }

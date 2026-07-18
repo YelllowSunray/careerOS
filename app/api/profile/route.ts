@@ -1,0 +1,70 @@
+import { NextRequest } from "next/server";
+import { verifyAuth, jsonError, jsonOk, AuthError } from "@/lib/api/auth";
+import { getProfile, saveProfile } from "@/services/firestore";
+import { nowIso } from "@/lib/utils/dates";
+import type { UserProfile } from "@/lib/types";
+
+export async function GET(request: NextRequest) {
+  try {
+    const userId = await verifyAuth(request);
+    const profile = await getProfile(userId);
+    return jsonOk(profile);
+  } catch (e) {
+    if (e instanceof AuthError) return jsonError(e.message, 401);
+    return jsonError("Failed to fetch profile", 500);
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const userId = await verifyAuth(request);
+    const body = await request.json();
+    const existing = await getProfile(userId);
+
+    const profile: UserProfile = {
+      userId,
+      name: body.name ?? existing?.name ?? "",
+      email: body.email ?? existing?.email ?? "",
+      phoneNumber:
+        body.phoneNumber !== undefined
+          ? String(body.phoneNumber).trim() || undefined
+          : existing?.phoneNumber,
+      linkedInUrl:
+        body.linkedInUrl !== undefined
+          ? String(body.linkedInUrl).trim() || undefined
+          : existing?.linkedInUrl,
+      githubUrl:
+        body.githubUrl !== undefined
+          ? String(body.githubUrl).trim() || undefined
+          : existing?.githubUrl,
+      portfolioUrls: body.portfolioUrls ?? existing?.portfolioUrls ?? [],
+      preferredCountries: (
+        body.preferredCountries ?? existing?.preferredCountries ?? []
+      ).slice(0, 1),
+      workPreference: body.workPreference ?? existing?.workPreference ?? "any",
+      jobPreferences:
+        body.jobPreferences !== undefined
+          ? String(body.jobPreferences).trim() || undefined
+          : existing?.jobPreferences,
+      resume: body.resume ?? existing?.resume,
+      coverLetters: body.coverLetters ?? existing?.coverLetters ?? [],
+      onboardingComplete: body.onboardingComplete ?? existing?.onboardingComplete ?? false,
+      settings: body.settings ?? existing?.settings ?? {
+        fitScoreThreshold: 85,
+        autoApply: false,
+        jobBoards: ["linkedin", "indeed"],
+        playwrightJobSearchUrls: [],
+        careerPageUrls: [],
+      },
+      updatedAt: nowIso(),
+    };
+
+    await saveProfile(profile);
+    return jsonOk(profile);
+  } catch (e) {
+    if (e instanceof AuthError) return jsonError(e.message, 401);
+    const message = e instanceof Error ? e.message : "Failed to save profile";
+    console.error("Profile save error:", e);
+    return jsonError(message, 500);
+  }
+}
