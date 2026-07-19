@@ -10,6 +10,7 @@ import { getCategoryTotals } from "@/lib/ai-usage/categories";
 import { isWorkflowActive, isWorkflowPaused } from "@/lib/workflows/stale";
 import { StatusBadge } from "@/components/ui/badge";
 import { Copy, FileText, Loader2, Pause, Sparkles, Trash2 } from "lucide-react";
+import { isSkillIneligible } from "@/lib/job-search/hard-requirements";
 
 function formatJobSource(job: Job): string {
   const labels: Record<string, string> = {
@@ -238,11 +239,22 @@ export default function JobsPage() {
   const appByJobId = new Map(applications.map((a) => [a.jobId, a]));
 
   const sortedJobs = [...jobs]
-    .filter((job) => matchMap.get(job.id)?.languageRequirementMet !== false)
+    .filter((job) => {
+      const match = matchMap.get(job.id);
+      if (match?.languageRequirementMet === false) return false;
+      if (isSkillIneligible(match)) return false;
+      return true;
+    })
     .sort((a, b) => {
-      const scoreA = matchMap.get(a.id)?.fitScore ?? -1;
-      const scoreB = matchMap.get(b.id)?.fitScore ?? -1;
-      return scoreB - scoreA;
+      const ma = matchMap.get(a.id);
+      const mb = matchMap.get(b.id);
+      const fitDiff = (mb?.fitScore ?? -1) - (ma?.fitScore ?? -1);
+      if (fitDiff !== 0) return fitDiff;
+      const pathRank = (t?: string) =>
+        t === "destination" ? 4 : t === "step" ? 3 : t === "stretch" ? 2 : t === "lateral" ? 0 : 1;
+      const scopeDiff = (mb?.scopeIncrease ?? 0) - (ma?.scopeIncrease ?? 0);
+      if (scopeDiff !== 0) return scopeDiff;
+      return pathRank(mb?.pathType) - pathRank(ma?.pathType);
     });
 
   const categoryTotals = aiUsage ? getCategoryTotals(aiUsage) : null;
@@ -258,7 +270,7 @@ export default function JobsPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Jobs</h1>
           <p className="mt-1 text-sm text-zinc-500 sm:text-base">
-            AI searches LinkedIn/Indeed and scores each listing against your resume, LinkedIn profile, portfolio, languages, and job preferences.
+            AI searches against your career ladder destinations and scores scope step-ups, not just CV title clones.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
@@ -478,6 +490,47 @@ export default function JobsPage() {
                 </div>
                 {match && (
                   <div className="mt-4 space-y-2 text-sm">
+                    {(match.pathType || match.ladderPath) && (
+                      <div className="rounded-lg bg-zinc-900 px-3 py-2 text-zinc-50">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {match.pathType && (
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                match.pathType === "destination"
+                                  ? "bg-emerald-400/20 text-emerald-200"
+                                  : match.pathType === "step"
+                                    ? "bg-sky-400/20 text-sky-200"
+                                    : match.pathType === "stretch"
+                                      ? "bg-violet-400/20 text-violet-200"
+                                      : "bg-zinc-500/30 text-zinc-300"
+                              }`}
+                            >
+                              {match.pathType}
+                            </span>
+                          )}
+                          {match.scopeIncrease != null && (
+                            <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+                              Scope +{match.scopeIncrease}
+                            </span>
+                          )}
+                          {match.matchedDestination && (
+                            <span className="text-xs text-zinc-400">
+                              → {match.matchedDestination}
+                            </span>
+                          )}
+                        </div>
+                        {match.ladderPath && (
+                          <p className="mt-1.5 text-sm leading-snug text-zinc-100">
+                            {match.ladderPath}
+                          </p>
+                        )}
+                        {match.scopeNotes && (
+                          <p className="mt-1 text-xs text-zinc-400">
+                            {match.scopeNotes}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     {match.preferenceAlignment && (
                       <div
                         className={`rounded-lg px-3 py-2 ${
@@ -496,8 +549,9 @@ export default function JobsPage() {
                     )}
                     {(match.contributionScore != null ||
                       match.learningScore != null ||
-                      match.moneyScore != null) && (
-                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                      match.moneyScore != null ||
+                      match.scopeIncrease != null) && (
+                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
                         {[
                           {
                             label: "Contribute",
@@ -516,6 +570,12 @@ export default function JobsPage() {
                             score: match.moneyScore,
                             notes: match.moneyNotes,
                             tone: "bg-amber-50 text-amber-950",
+                          },
+                          {
+                            label: "Scope",
+                            score: match.scopeIncrease,
+                            notes: match.scopeNotes,
+                            tone: "bg-sky-50 text-sky-950",
                           },
                         ].map((pillar) => (
                           <div

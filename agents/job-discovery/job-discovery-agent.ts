@@ -12,7 +12,13 @@ import { filterListingsForCandidate } from "@/agents/tools/job-discovery-ai";
 import { seniorityLabel } from "@/lib/job-search/tailored-queries";
 import { discoverJobsFromCareerPages } from "@/agents/tools/job-discovery-career";
 import { validateListingIsJobPosting } from "@/agents/tools/job-discovery-ai";
-import { matchListingToCandidate } from "@/agents/tools/job-match";
+import {
+  matchListingToCandidate,
+} from "@/agents/tools/job-match";
+import {
+  isSkillIneligible,
+  unmetHardRequirementLabels,
+} from "@/lib/job-search/hard-requirements";
 import { fetchListingContent } from "@/agents/tools/listing-fetch";
 import { searchJobBoardsHttp } from "@/agents/tools/job-discovery-linkedin-guest";
 import { saveJob, saveJobMatch, getKnownJobIdentityKeys } from "@/services/firestore";
@@ -215,6 +221,14 @@ async function listingsToMatchedJobs(
           return { kind: "rejected" as const, identityKey };
         }
 
+        if (isSkillIneligible(matchResult)) {
+          const hardGaps = unmetHardRequirementLabels(matchResult.missingSkills);
+          console.log(
+            `[Job discovery] [${platform}] Rejected (skills): ${listing.title} @ ${listing.company} · skillRequirementMet=${matchResult.skillRequirementMet} · hard gaps [${hardGaps.join(", ") || "—"}] — ${matchResult.skillNotes || "core skill fit not met"}`
+          );
+          return { kind: "rejected" as const, identityKey };
+        }
+
         if (matchResult.fitScore < MIN_FIT_TO_SAVE) {
           console.log(
             `[Job discovery] [${platform}] Rejected (${matchResult.fitScore}): ${listing.title} @ ${listing.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
@@ -273,11 +287,18 @@ async function listingsToMatchedJobs(
           requiredLanguages: matchResult.requiredLanguages,
           languageRequirementMet: matchResult.languageRequirementMet,
           languageNotes: matchResult.languageNotes,
+          skillRequirementMet: matchResult.skillRequirementMet,
+          skillNotes: matchResult.skillNotes,
+          scopeIncrease: matchResult.scopeIncrease,
+          scopeNotes: matchResult.scopeNotes,
+          pathType: matchResult.pathType,
+          ladderPath: matchResult.ladderPath,
+          matchedDestination: matchResult.matchedDestination,
           matchedAt: nowIso(),
         };
 
         console.log(
-          `[Job discovery] [${platform}] Matched (${matchResult.fitScore}): ${job.title} @ ${job.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
+          `[Job discovery] [${platform}] Matched (${matchResult.fitScore}): ${job.title} @ ${job.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}/S${matchResult.scopeIncrease} · ${matchResult.pathType}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
         );
         return { kind: "matched" as const, job, match, identityKey };
       } catch (e) {

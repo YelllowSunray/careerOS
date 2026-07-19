@@ -152,6 +152,37 @@ export interface InferredRole {
   approved: boolean;
 }
 
+/** Near-term next role (~0–18 months) or stretch (~1–2 years). */
+export type LadderHorizon = "next" | "stretch";
+/** Same job family vs adjacent sector/function move. */
+export type LadderBranch = "same" | "adjacent";
+
+/** One destination on the candidate's career ladder map. */
+export interface CareerLadderRole {
+  title: string;
+  horizon: LadderHorizon;
+  branch: LadderBranch;
+  /** Strengths they already have that transfer into this role */
+  transferableStrengths: string[];
+  /** Gaps to close before / while in the role */
+  gapsToClose: string[];
+  /** Why this increases scope (team, stakeholders, decisions, market, IC→lead, etc.) */
+  whyScopeIncreases: string;
+  /** Optional LinkedIn/Indeed-style search phrase for this destination */
+  searchQuery?: string;
+}
+
+/** Explicit ladder: current → next (steps) → stretch (destinations). */
+export interface CareerLadder {
+  currentRole: string;
+  /** One-line strategy for how they climb */
+  summary: string;
+  /** 2–4 plausible next roles (same branch + adjacent) */
+  nextRoles: CareerLadderRole[];
+  /** 1–3 stretch roles ~1–2 years out */
+  stretchRoles: CareerLadderRole[];
+}
+
 export interface CandidateProject {
   name: string;
   description: string;
@@ -166,6 +197,8 @@ export interface CandidateProfile {
   projects: CandidateProject[];
   technologies: string[];
   inferredRoles: InferredRole[];
+  /** AI career ladder map — primary driver for search & matching */
+  careerLadder?: CareerLadder;
   experienceLevel: ExperienceLevel;
   strengths: string[];
   gaps: string[];
@@ -212,6 +245,9 @@ export interface MissingSkill {
   isHardRequirement: boolean;
 }
 
+/** How this job sits on the candidate's ladder path. */
+export type JobPathType = "step" | "stretch" | "destination" | "lateral";
+
 export interface JobMatch {
   id: string;
   userId: string;
@@ -239,6 +275,24 @@ export interface JobMatch {
   /** Whether candidate languages satisfy hard requirements */
   languageRequirementMet?: boolean;
   languageNotes?: string;
+  /**
+   * AI hard gate: false when the candidate lacks core must-have skills/credentials
+   * for this role (wrong craft / non-negotiable gaps). Job must not be shown.
+   */
+  skillRequirementMet?: boolean;
+  skillNotes?: string;
+  /**
+   * Scope step-up vs current role (0-100): team size, budget, stakeholders,
+   * decision rights, market size, IC→lead — not title synonymy.
+   */
+  scopeIncrease?: number;
+  scopeNotes?: string;
+  /** step = near-term ladder next; stretch = ambitious climb; destination = direct ladder target; lateral = no climb */
+  pathType?: JobPathType;
+  /** Path narrative, e.g. "Risk Analyst → unlocks Senior Compliance in 1–2 moves" */
+  ladderPath?: string;
+  /** Ladder destination title this job maps to, if any */
+  matchedDestination?: string;
   matchedAt: string;
 }
 

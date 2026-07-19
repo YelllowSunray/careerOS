@@ -167,6 +167,7 @@ export function formatContextForPrompt(ctx: CandidateContext, maxChars = 20000):
         technologies: ctx.structuredProfile.technologies,
         roles: ctx.structuredProfile.inferredRoles,
         experienceLevel: ctx.structuredProfile.experienceLevel,
+        careerLadder: ctx.structuredProfile.careerLadder,
       })
     );
   }
@@ -194,6 +195,56 @@ export function getTopInferredRolesFromContext(
     .filter(Boolean);
 
   return [...new Set([...fromProfile, ...fromResume])].slice(0, limit);
+}
+
+/**
+ * Ladder destinations for search: next roles first, then stretch.
+ * Prefer searchQuery when present; otherwise title.
+ */
+export function getLadderSearchQueriesFromContext(
+  ctx: CandidateContext,
+  limit = 6
+): string[] {
+  const ladder = ctx.structuredProfile?.careerLadder;
+  if (!ladder) return [];
+
+  const queries: string[] = [];
+  for (const role of [...ladder.nextRoles, ...ladder.stretchRoles]) {
+    const q = (role.searchQuery || role.title).trim().toLowerCase();
+    if (q.length >= 3) queries.push(q);
+  }
+  return [...new Set(queries)].slice(0, limit);
+}
+
+/** Compact ladder block for match/search prompts. */
+export function formatCareerLadderForPrompt(ctx: CandidateContext): string {
+  const ladder = ctx.structuredProfile?.careerLadder;
+  if (!ladder) return "";
+
+  const fmt = (r: {
+    title: string;
+    branch: string;
+    horizon: string;
+    transferableStrengths: string[];
+    gapsToClose: string[];
+    whyScopeIncreases: string;
+    searchQuery?: string;
+  }) =>
+    `- ${r.title} [${r.horizon}/${r.branch}]` +
+    (r.searchQuery ? ` search:"${r.searchQuery}"` : "") +
+    `\n  transfer: ${r.transferableStrengths.join("; ") || "—"}` +
+    `\n  gaps: ${r.gapsToClose.join("; ") || "—"}` +
+    `\n  scope: ${r.whyScopeIncreases || "—"}`;
+
+  return [
+    `CAREER LADDER (primary destinations — search & score against these):`,
+    `Current: ${ladder.currentRole}`,
+    `Strategy: ${ladder.summary}`,
+    `Next roles (steps ~0–18 months):`,
+    ...ladder.nextRoles.map(fmt),
+    `Stretch roles (~1–2 years):`,
+    ...ladder.stretchRoles.map(fmt),
+  ].join("\n");
 }
 
 /** Top N skills for job board search (skills first, then technologies as fallback). */

@@ -56,6 +56,9 @@ export const candidateProfileAgent: Agent<void, CandidateProfile> = {
           ...r,
           approved: true,
         })),
+        ...(synthesized.careerLadder
+          ? { careerLadder: synthesized.careerLadder }
+          : {}),
         experienceLevel: synthesized.experienceLevel,
         strengths: synthesized.strengths,
         gaps: synthesized.gaps,
@@ -66,7 +69,7 @@ export const candidateProfileAgent: Agent<void, CandidateProfile> = {
           github: false,
         },
         lastGeneratedAt: nowIso(),
-        version: 1,
+        version: synthesized.careerLadder ? 2 : 1,
       };
 
       await saveCandidateProfile(profile);

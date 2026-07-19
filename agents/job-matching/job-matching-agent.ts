@@ -1,6 +1,10 @@
 import type { Agent } from "@/agents/core/agent";
 import type { AgentContext, AgentResult } from "@/agents/core/context";
 import { matchJobToCandidate } from "@/agents/tools/job-match";
+import {
+  isSkillIneligible,
+  unmetHardRequirementLabels,
+} from "@/lib/job-search/hard-requirements";
 import { getJobMatch, saveJobMatch } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
 import { isWorkflowPaused } from "@/lib/workflows/pause";
@@ -46,6 +50,12 @@ export const jobMatchingAgent: Agent<JobMatchingInput, JobMatch[]> = {
           );
           continue;
         }
+        if (isSkillIneligible(result)) {
+          console.log(
+            `[Job matching] Skipped (skills): ${job.title} @ ${job.company} · skillRequirementMet=${result.skillRequirementMet} · [${unmetHardRequirementLabels(result.missingSkills).join(", ") || result.skillNotes || "core skill fit not met"}]`
+          );
+          continue;
+        }
         const match: JobMatch = {
           id: `match_${job.id}`,
           userId: ctx.userId,
@@ -66,6 +76,13 @@ export const jobMatchingAgent: Agent<JobMatchingInput, JobMatch[]> = {
           requiredLanguages: result.requiredLanguages,
           languageRequirementMet: result.languageRequirementMet,
           languageNotes: result.languageNotes,
+          skillRequirementMet: result.skillRequirementMet,
+          skillNotes: result.skillNotes,
+          scopeIncrease: result.scopeIncrease,
+          scopeNotes: result.scopeNotes,
+          pathType: result.pathType,
+          ladderPath: result.ladderPath,
+          matchedDestination: result.matchedDestination,
           matchedAt: nowIso(),
         };
         await saveJobMatch(match);

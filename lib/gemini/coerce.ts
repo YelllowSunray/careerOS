@@ -391,6 +391,52 @@ export function normalizeJobMatch(raw: unknown): unknown {
     o.languageNotes ?? o.language_notes ?? ""
   ).trim();
 
+  let skillRequirementMet =
+    o.skillRequirementMet ?? o.skill_requirement_met ?? o.skillsMet;
+  if (typeof skillRequirementMet === "string") {
+    const s = skillRequirementMet.toLowerCase().trim();
+    skillRequirementMet = s === "true" || s === "yes" || s === "met";
+  }
+  if (typeof skillRequirementMet !== "boolean") {
+    // Infer fail only when model already flagged hard missing skills.
+    const hardMissing = Array.isArray(missingSkills)
+      ? missingSkills.some(
+          (s) =>
+            s &&
+            typeof s === "object" &&
+            Boolean((s as { isHardRequirement?: boolean }).isHardRequirement)
+        )
+      : false;
+    skillRequirementMet = !hardMissing;
+  }
+
+  const skillNotes = String(o.skillNotes ?? o.skill_notes ?? "").trim();
+
+  const scopeIncrease = scoreOrUndef(
+    o.scopeIncrease ?? o.scope_increase ?? details?.scopeIncrease
+  );
+  const scopeNotes = String(o.scopeNotes ?? o.scope_notes ?? "").trim();
+
+  const pathRaw = String(
+    o.pathType ?? o.path_type ?? o.ladderType ?? o.ladder_type ?? ""
+  )
+    .toLowerCase()
+    .trim();
+  let pathType: string = "step";
+  if (pathRaw.includes("stretch")) pathType = "stretch";
+  else if (pathRaw.includes("dest")) pathType = "destination";
+  else if (pathRaw.includes("later") || pathRaw.includes("side"))
+    pathType = "lateral";
+  else if (pathRaw.includes("step") || pathRaw.includes("next"))
+    pathType = "step";
+
+  const ladderPath = String(
+    o.ladderPath ?? o.ladder_path ?? o.pathNarrative ?? o.path_narrative ?? ""
+  ).trim();
+  const matchedDestination = String(
+    o.matchedDestination ?? o.matched_destination ?? o.destination ?? ""
+  ).trim();
+
   return {
     fitScore: fitScoreOut,
     strengths,
@@ -404,6 +450,13 @@ export function normalizeJobMatch(raw: unknown): unknown {
     requiredLanguages,
     languageRequirementMet,
     languageNotes,
+    skillRequirementMet,
+    skillNotes,
+    scopeIncrease: scopeIncrease ?? 40,
+    scopeNotes,
+    pathType,
+    ladderPath,
+    ...(matchedDestination ? { matchedDestination } : {}),
     ...(o.employerType || o.employer_type
       ? { employerType: String(o.employerType ?? o.employer_type) }
       : {}),
@@ -459,6 +512,95 @@ export function normalizeCandidateSynthesis(raw: unknown): unknown {
   const experienceLevel =
     o.experienceLevel ?? o.experience_level ?? o.level ?? o.seniority;
 
+  const normalizeLadderRole = (r: unknown) => {
+    const role = (r ?? {}) as Record<string, unknown>;
+    const horizonRaw = String(role.horizon ?? role.timeframe ?? "next")
+      .toLowerCase()
+      .trim();
+    const horizon = horizonRaw.includes("stretch") ? "stretch" : "next";
+    const branchRaw = String(role.branch ?? role.path ?? "same")
+      .toLowerCase()
+      .trim();
+    const branch = branchRaw.includes("adj") ? "adjacent" : "same";
+    const title = String(role.title ?? role.role ?? role.name ?? "").trim();
+    if (!title) return null;
+    const searchQuery = String(role.searchQuery ?? role.search_query ?? "")
+      .trim()
+      .slice(0, 80);
+    return {
+      title,
+      horizon,
+      branch,
+      transferableStrengths: coerceStringArray(
+        role.transferableStrengths ??
+          role.transferable_strengths ??
+          role.strengths
+      ),
+      gapsToClose: coerceStringArray(
+        role.gapsToClose ?? role.gaps_to_close ?? role.gaps
+      ),
+      whyScopeIncreases: String(
+        role.whyScopeIncreases ??
+          role.why_scope_increases ??
+          role.scopeIncrease ??
+          role.scope_notes ??
+          ""
+      ).trim(),
+      ...(searchQuery ? { searchQuery } : {}),
+    };
+  };
+
+  const ladderRaw = o.careerLadder ?? o.career_ladder ?? o.ladder;
+  let careerLadder: Record<string, unknown> | undefined;
+  if (ladderRaw && typeof ladderRaw === "object") {
+    const L = ladderRaw as Record<string, unknown>;
+    const nextRoles = (
+      Array.isArray(L.nextRoles)
+        ? L.nextRoles
+        : Array.isArray(L.next_roles)
+          ? L.next_roles
+          : []
+    )
+      .map(normalizeLadderRole)
+      .filter(Boolean);
+    const stretchRoles = (
+      Array.isArray(L.stretchRoles)
+        ? L.stretchRoles
+        : Array.isArray(L.stretch_roles)
+          ? L.stretch_roles
+          : []
+    )
+      .map(normalizeLadderRole)
+      .filter(Boolean)
+      .map((r) => (r ? { ...r, horizon: "stretch" as const } : r));
+
+    const currentRole = String(
+      L.currentRole ?? L.current_role ?? L.current ?? ""
+    ).trim();
+    if (currentRole && nextRoles.length > 0) {
+      careerLadder = {
+        currentRole,
+        summary: String(L.summary ?? L.strategy ?? "").trim() ||
+          `Climb from ${currentRole} via scope step-ups and adjacent moves.`,
+        nextRoles,
+        stretchRoles:
+          stretchRoles.length > 0
+            ? stretchRoles
+            : nextRoles.slice(0, 1).map((r) =>
+                r
+                  ? {
+                      ...r,
+                      horizon: "stretch" as const,
+                      whyScopeIncreases:
+                        r.whyScopeIncreases ||
+                        "Broader ownership and leadership ceiling in 1–2 years.",
+                    }
+                  : r
+              ),
+      };
+    }
+  }
+
   return {
     skills: coerceStringArray(o.skills),
     technologies: coerceStringArray(o.technologies ?? o.tech ?? o.tools),
@@ -493,6 +635,7 @@ export function normalizeCandidateSynthesis(raw: unknown): unknown {
           };
         })
       : [],
+    ...(careerLadder ? { careerLadder } : {}),
   };
 }
 

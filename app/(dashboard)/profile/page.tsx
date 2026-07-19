@@ -511,6 +511,101 @@ export default function ProfilePage() {
           </div>
         </Card>
 
+        <Card className="lg:col-span-2">
+          <CardTitle>Career ladder</CardTitle>
+          {candidate?.careerLadder ? (
+            <div className="mt-4 space-y-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Current
+                </p>
+                <p className="mt-0.5 text-sm font-medium">
+                  {candidate.careerLadder.currentRole}
+                </p>
+                <p className="mt-1 text-sm text-zinc-600">
+                  {candidate.careerLadder.summary}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Next roles (steps)
+                </p>
+                <ul className="mt-2 space-y-3">
+                  {candidate.careerLadder.nextRoles.map((r) => (
+                    <li
+                      key={`next-${r.title}`}
+                      className="rounded-lg border border-zinc-100 px-3 py-2 text-sm"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-medium">{r.title}</span>
+                        <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium uppercase text-sky-800">
+                          {r.branch}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-600">
+                        <span className="font-medium text-zinc-800">Scope: </span>
+                        {r.whyScopeIncreases || "—"}
+                      </p>
+                      {r.transferableStrengths.length > 0 && (
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          Transfer: {r.transferableStrengths.join("; ")}
+                        </p>
+                      )}
+                      {r.gapsToClose.length > 0 && (
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          Gaps: {r.gapsToClose.join("; ")}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Stretch (~1–2 years)
+                </p>
+                <ul className="mt-2 space-y-3">
+                  {candidate.careerLadder.stretchRoles.map((r) => (
+                    <li
+                      key={`stretch-${r.title}`}
+                      className="rounded-lg border border-violet-100 bg-violet-50/40 px-3 py-2 text-sm"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-medium">{r.title}</span>
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium uppercase text-violet-800">
+                          {r.branch}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-600">
+                        <span className="font-medium text-zinc-800">Scope: </span>
+                        {r.whyScopeIncreases || "—"}
+                      </p>
+                      {r.transferableStrengths.length > 0 && (
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          Transfer: {r.transferableStrengths.join("; ")}
+                        </p>
+                      )}
+                      {r.gapsToClose.length > 0 && (
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          Gaps: {r.gapsToClose.join("; ")}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : isProcessing ? (
+            <p className="mt-4 flex items-center gap-2 text-sm text-zinc-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Building ladder map…
+            </p>
+          ) : (
+            <p className="mt-4 text-sm text-zinc-500">
+              No ladder yet. Click Re-analyze to generate next and stretch destinations.
+            </p>
+          )}
+        </Card>
+
         <Card>
           <CardTitle>Inferred roles</CardTitle>
           {candidate?.inferredRoles?.length ? (

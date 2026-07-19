@@ -7,7 +7,7 @@ import {
 } from "@/lib/gemini/coerce";
 import { isBlockedPageText } from "./html";
 import { logBoardError, logBoardInfo, logBoardWarn } from "./job-board-log";
-import { formatContextForPrompt } from "@/lib/candidate/context";
+import { formatContextForPrompt, formatCareerLadderForPrompt } from "@/lib/candidate/context";
 import {
   inferExperienceLevelFromContext,
   seniorityLabel,
@@ -41,6 +41,7 @@ export async function filterListingsForCandidate(
   if (listings.length === 0) return [];
 
   const candidateBlock = formatContextForPrompt(context, 10000);
+  const ladderBlock = formatCareerLadderForPrompt(context);
   const workPref = context.profile.workPreference;
   const countries = context.profile.preferredCountries.join(", ") || "any";
   const jobPrefs = context.profile.jobPreferences?.trim();
@@ -78,15 +79,17 @@ ACCEPT (relevant=true, score 55+):
 - Same branch OR different branch where transferable strengths make contribution plausible soon
 - Seniority step-ups and broader-scope roles that climb the ladder
 - Roles that expand capabilities (learning) and look commercially sensible (money)
-- Do NOT reject just because the title differs from "Compliance Officer" (or whatever they hold now)
+- Prefer listings that map to CAREER LADDER next/stretch destinations (scope step-ups and adjacent moves)
+- Do NOT reject just because the title differs from their current role
 - Preferences are soft bias only
 
-relevanceScore = AI judgment of contribution × learning × money potential as an ideal next step.
+relevanceScore = AI judgment of contribution × learning × money × scope potential as an ideal next step.
 
 Work preference: ${workPref}
 Preferred locations: ${countries}
 Target seniority baseline: ${seniorityLabel(level)}
 ${jobPrefs ? `Job preferences (soft): ${jobPrefs}` : "No special job preferences."}
+${ladderBlock ? `\n${ladderBlock}` : ""}
 
 CANDIDATE:
 ${candidateBlock}

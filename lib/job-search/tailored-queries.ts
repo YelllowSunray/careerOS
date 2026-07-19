@@ -3,6 +3,8 @@ import { generateStructured } from "@/lib/gemini/client";
 import { normalizeTailoredSearchPlan } from "@/lib/gemini/coerce";
 import {
   formatContextForPrompt,
+  formatCareerLadderForPrompt,
+  getLadderSearchQueriesFromContext,
   getTopInferredRolesFromContext,
 } from "@/lib/candidate/context";
 import type { CandidateContext } from "@/lib/types/candidate-context";
@@ -81,10 +83,15 @@ function buildFallbackQueries(
   ctx: CandidateContext,
   level: ExperienceLevel
 ): string[] {
+  const ladderQueries = getLadderSearchQueriesFromContext(ctx, 4);
+  if (ladderQueries.length >= 2) {
+    return ladderQueries.slice(0, 4);
+  }
+
   const rawRoles = getTopInferredRolesFromContext(ctx, 3);
   const roles = rawRoles.map(normalizeRoleTitle).filter((r) => r.length >= 3);
   const modifiers = LEVEL_MODIFIERS[level];
-  const queries: string[] = [];
+  const queries: string[] = [...ladderQueries];
 
   for (let i = 0; i < roles.length && queries.length < 3; i++) {
     const role = roles[i];
@@ -123,7 +130,7 @@ function buildFallbackQueries(
     if (!queries.includes(q)) queries.push(q);
   }
 
-  return [...new Set(queries)].slice(0, 3);
+  return [...new Set(queries)].slice(0, 4);
 }
 
 /** AI infers seniority + builds 3 board-ready search queries from CV/portfolio. */
@@ -134,6 +141,8 @@ export async function generateTailoredSearchPlan(
   const seedRoles = getTopInferredRolesFromContext(context, 5).map(
     normalizeRoleTitle
   );
+  const ladderQueries = getLadderSearchQueriesFromContext(context, 6);
+  const ladderBlock = formatCareerLadderForPrompt(context);
   const heuristicLevel = inferExperienceLevelFromContext(context);
   const jobPrefs = context.profile.jobPreferences?.trim();
 
@@ -141,25 +150,30 @@ export async function generateTailoredSearchPlan(
     const result = await generateStructured(
       `Design a FULLY AI-powered job board search plan for this candidate's IDEAL NEXT ROLES.
 
-Read their entire resume, LinkedIn, portfolio, and preferences. Infer where they can climb — not only the next title in their current job branch.
+Read their entire resume, LinkedIn, portfolio, preferences, and CAREER LADDER. Search for ladder DESTINATIONS — not clones of their current CV title.
+
+${ladderBlock || "No career ladder yet — invent 4 destination queries from transferable strengths (mix same-branch + adjacent)."}
 
 STEP 1 — Infer REALISTIC target experience level from evidence of ownership/years/titles:
 - Levels: junior | mid | senior | staff | principal
 - Aim one step up when the profile supports ladder climb
 
-STEP 2 — Produce exactly 4 LinkedIn/Indeed keyword queries that explore IDEAL futures.
+STEP 2 — Produce exactly 4 LinkedIn/Indeed keyword queries that target ladder destinations.
 
-QUERY RULES (AI judgment only — no fixed title lists):
+QUERY RULES:
 - 2-5 words each; role-style phrases boards understand
-- At most ONE query may closely mirror their current job title/branch
-- At least TWO queries MUST explore different branches/families where their transferable strengths could contribute AND they would learn/climb (you invent the paths from the profile — e.g. from compliance into risk, regulatory affairs, governance, privacy, policy, fincrime leadership, etc. ONLY if credible for THIS person)
-- At least ONE query should target a clear seniority step up (or broader scope leadership) when mid+
+- Prefer the ladder's searchQuery / nextRoles / stretchRoles titles when present
+- At most ONE query may closely mirror their current job title
+- At least TWO queries MUST be adjacent-branch destinations (slight sector/function moves that increase scope)
+- At least ONE query should be a clear scope step-up (broader ownership / lead / manager of process — not a lateral clone)
+- Include at least one "step" (near-term next) and one "stretch" destination when the ladder has both
 - NEVER force VP/Director/C-level for junior/mid without leadership evidence
 - Preferences are soft: at most one query may reflect preferred sector/comp language
 - Vary queries; do not repeat the same role family four times
 - Do NOT invent experience; DO invent plausible NEXT role directions supported by their skills/achievements
 
-Seed role hints (optional — you may diverge when better paths exist): ${seedRoles.join(", ") || "infer freely from resume"}
+Ladder search seeds (use or refine): ${ladderQueries.join(", ") || "none — invent from profile"}
+Seed role hints: ${seedRoles.join(", ") || "infer freely from resume"}
 Heuristic level hint: ${heuristicLevel}
 ${jobPrefs ? `Job preferences (soft bias only): ${jobPrefs}` : "No special job preferences."}
 
@@ -167,7 +181,7 @@ Return JSON:
 {
   "inferredExperienceLevel": "mid",
   "searchQueries": ["query one", "query two", "query three", "query four"],
-  "rationale": "short explanation of the ladder / cross-branch strategy"
+  "rationale": "short explanation of the ladder / cross-branch / scope strategy"
 }
 
 CANDIDATE:

@@ -7,6 +7,16 @@ import {
 
 const stringArray = z.array(z.string());
 
+const ladderRoleSchema = z.object({
+  title: z.string(),
+  horizon: z.enum(["next", "stretch"]),
+  branch: z.enum(["same", "adjacent"]),
+  transferableStrengths: stringArray,
+  gapsToClose: stringArray,
+  whyScopeIncreases: z.string(),
+  searchQuery: z.string().optional(),
+});
+
 export const resumeExtractionSchema = z.preprocess(
   normalizeResumeExtraction,
   z.object({
@@ -57,7 +67,29 @@ const CANDIDATE_JSON_SHAPE = `{
   "inferredRoles": [{ "role": "string", "confidence": 85 }],
   "experienceLevel": "mid",
   "strengths": ["string"],
-  "gaps": ["string"]
+  "gaps": ["string"],
+  "careerLadder": {
+    "currentRole": "string",
+    "summary": "1-2 sentence climb strategy",
+    "nextRoles": [{
+      "title": "string",
+      "horizon": "next",
+      "branch": "same" | "adjacent",
+      "transferableStrengths": ["string"],
+      "gapsToClose": ["string"],
+      "whyScopeIncreases": "string",
+      "searchQuery": "2-5 word board search phrase"
+    }],
+    "stretchRoles": [{
+      "title": "string",
+      "horizon": "stretch",
+      "branch": "same" | "adjacent",
+      "transferableStrengths": ["string"],
+      "gapsToClose": ["string"],
+      "whyScopeIncreases": "string",
+      "searchQuery": "2-5 word board search phrase"
+    }]
+  }
 }`;
 
 export async function extractResumeData(
@@ -99,6 +131,14 @@ export const candidateSynthesisSchema = z.preprocess(
     strengths: stringArray,
     gaps: stringArray,
     experienceLevel: z.enum(["junior", "mid", "senior", "staff", "principal"]),
+    careerLadder: z
+      .object({
+        currentRole: z.string(),
+        summary: z.string(),
+        nextRoles: z.array(ladderRoleSchema).min(1).max(4),
+        stretchRoles: z.array(ladderRoleSchema).max(3),
+      })
+      .optional(),
   })
 );
 
@@ -122,6 +162,15 @@ Rules:
 - Infer suitable job roles with confidence 0-100
 - Only use information present in the provided data
 - Treat LinkedIn experience and skills as first-class evidence alongside the resume
+
+CAREER LADDER (required — this drives job search):
+Build an explicit climb map. Do NOT only list title synonyms of their current job.
+- currentRole: their present / most recent role
+- nextRoles: 2–4 plausible NEXT roles (~0–18 months). Mix same-branch step-ups AND adjacent sector/function moves (e.g. Compliance → Risk, AML, Privacy, Regulatory Affairs) when transferable strengths support it
+- stretchRoles: 1–3 roles ~1–2 years out that increase scope further
+- For EVERY ladder role include: transferableStrengths (already have), gapsToClose, whyScopeIncreases (team/stakeholders/decision rights/market/IC→lead — not just a fancier title), searchQuery (2–5 words boards understand)
+- Prefer scope increases and slight sector moves that compound into bigger jumps later
+- At least TWO nextRoles or stretchRoles should be branch="adjacent" when credible
 
 Return JSON matching this exact shape:
 ${CANDIDATE_JSON_SHAPE}
