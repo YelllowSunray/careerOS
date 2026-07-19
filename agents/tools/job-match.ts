@@ -18,8 +18,9 @@ const matchSchema = z.object({
   ),
   applyRecommendation: z.boolean(),
   reasoning: z.string(),
-  preferenceAlignment: z.string().optional(),
-  preferencesMatch: z.boolean().optional(),
+  preferenceAlignment: z.string(),
+  preferencesMatch: z.boolean(),
+  employerType: z.string().optional(),
 });
 
 export type JobMatchResult = z.infer<typeof matchSchema>;
@@ -36,41 +37,57 @@ function buildHolisticMatchPrompt(
 
   const preferenceBlock = jobPrefs
     ? `
-CANDIDATE JOB PREFERENCES (must factor into fitScore and preferenceAlignment):
+CANDIDATE JOB PREFERENCES (free text — interpret as HARD CONSTRAINTS for THIS candidate only):
+"""
 ${jobPrefs}
-- Heavily penalize fitScore when the role clearly conflicts (e.g. part-time when they want full-time, on-site when they want remote, wrong country)
-- Note specific alignments and mismatches in preferenceAlignment`
+"""
+
+PREFERENCE ENFORCEMENT (AI-interpreted from the text above — do not invent constraints they did not state):
+1. Classify the employer from company name + posting into a short employerType label
+   (examples of labels: ngo_charity, non_profit, government, municipality, province,
+   commercial, consultancy, housing_corporation, education, healthcare_provider, other).
+2. Decide preferencesMatch by comparing THAT classification to what THIS candidate asked for.
+3. If preferences name an org/sector type (NGO, charity, startup, fintech, etc.):
+   - preferencesMatch=true ONLY when the employer clearly fits that type.
+   - Adjacent "social impact" work at a different org type does NOT satisfy an org-type preference.
+   - Example interpretation only (apply the same logic to whatever THEY wrote):
+     if they asked for charities/NGOs, then gemeente/provincie/government, commercial firms,
+     woningcorporaties, and for-profit consultancies → preferencesMatch=false.
+4. Also enforce hours, salary, remote/onsite, location if they stated them.
+5. If the posting is too thin to verify a stated preference (especially org type), preferencesMatch=false.
+6. When preferencesMatch=false: fitScore MUST be ≤40 and applyRecommendation=false.
+   Skills overlap NEVER overrides a preference conflict.`
     : `
+No free-text job preferences on file.
 Work preference: ${workPref}
-Preferred locations: ${countries}`;
+Preferred locations: ${countries}
+Set preferencesMatch=true and preferenceAlignment="No specific job preferences stated."`;
 
   return `You are an expert career matcher finding IDEAL fits between a candidate and a job.
 
-Read the candidate's FULL resume, LinkedIn profile, and portfolio — projects, employers, technologies, trajectory, and experience level.
-Read the FULL job posting — title, requirements, responsibilities, seniority, employment type, and location/remote policy.
+Read the candidate's FULL resume, LinkedIn profile, and portfolio.
+Read the FULL job posting — title, company/employer type, requirements, seniority, employment type, location/remote.
 
 TARGET SENIORITY: ${seniorityLabel(targetLevel)} — penalize roles clearly above or below this level.
 ${preferenceBlock}
 
-Score holistically — NOT keyword matching alone:
-- Does their real experience (resume + LinkedIn + portfolio) align with what this role needs?
-- Is the seniority level appropriate (not too junior, not unrealistic reach)?
-- Would their portfolio / LinkedIn work history convince this employer?
-- Are hard requirements met by evidence in resume, LinkedIn, or portfolio?
-- Does the role match their stated job preferences (employment type, remote/onsite, location, industry)?
-- Nice-to-have gaps should NOT heavily penalize the score
+Score holistically:
+- Skills/experience fit from resume + LinkedIn + portfolio
+- Seniority appropriateness
+- Preference compliance (hard when preferences exist)
 
-fitScore is 0-100 (below 50 = poor match, 70+ = good match, 85+ = strong match)
+fitScore is 0-100 (≤40 = preference conflict or poor fit, 70+ = good, 85+ = strong)
 
 Return ONLY valid JSON with this exact shape:
 {
   "fitScore": 0-100,
-  "strengths": ["string array of match strengths"],
+  "strengths": ["string"],
   "missingSkills": [{ "skill": "string", "isHardRequirement": true/false }],
   "applyRecommendation": true/false,
-  "reasoning": "2-4 sentence summary of skills/experience fit (cite LinkedIn when it supplies evidence)",
-  "preferenceAlignment": "1-2 sentences on how this job matches or conflicts with their stated job preferences",
-  "preferencesMatch": true/false
+  "reasoning": "2-4 sentences on skills/experience fit",
+  "preferenceAlignment": "1-2 sentences naming employer type vs stated preferences",
+  "preferencesMatch": true/false,
+  "employerType": "short label"
 }
 
 CANDIDATE (resume + LinkedIn + portfolio + profile):
@@ -78,6 +95,32 @@ ${candidateBlock}
 
 JOB:
 ${jobBlock}`;
+}
+
+function enforcePreferenceHardCap(
+  result: JobMatchResult,
+  hasPrefs: boolean
+): JobMatchResult {
+  if (!hasPrefs) {
+    return {
+      ...result,
+      preferencesMatch: result.preferencesMatch ?? true,
+      preferenceAlignment:
+        result.preferenceAlignment || "No specific job preferences stated.",
+    };
+  }
+  if (result.preferencesMatch !== true) {
+    return {
+      ...result,
+      preferencesMatch: false,
+      fitScore: Math.min(result.fitScore, 40),
+      applyRecommendation: false,
+      preferenceAlignment:
+        result.preferenceAlignment ||
+        "Could not confirm the employer matches stated job preferences.",
+    };
+  }
+  return result;
 }
 
 /** Deep AI match: full resume + LinkedIn + portfolio vs full job posting text. */
@@ -91,6 +134,7 @@ export async function matchListingToCandidate(
   },
   postingText: string
 ): Promise<JobMatchResult> {
+  const hasPrefs = Boolean(context.profile.jobPreferences?.trim());
   const jobBlock = `Title: ${listing.title}
 Company: ${listing.company}
 Location: ${listing.location ?? "unknown"}
@@ -99,7 +143,7 @@ URL: ${listing.url}
 FULL JOB POSTING:
 ${postingText.slice(0, 14000)}`;
 
-  return generateStructured(
+  const result = await generateStructured(
     buildHolisticMatchPrompt(context, jobBlock),
     matchSchema,
     {
@@ -108,9 +152,11 @@ ${postingText.slice(0, 14000)}`;
       coerce: normalizeJobMatch,
     }
   );
+  return enforcePreferenceHardCap(result, hasPrefs);
 }
 
 export async function matchJobToCandidate(job: Job, context: CandidateContext) {
+  const hasPrefs = Boolean(context.profile.jobPreferences?.trim());
   const jobBlock = JSON.stringify({
     title: job.title,
     company: job.company,
@@ -119,7 +165,7 @@ export async function matchJobToCandidate(job: Job, context: CandidateContext) {
     location: job.location,
   });
 
-  return generateStructured(
+  const result = await generateStructured(
     buildHolisticMatchPrompt(context, jobBlock),
     matchSchema,
     {
@@ -128,4 +174,5 @@ export async function matchJobToCandidate(job: Job, context: CandidateContext) {
       coerce: normalizeJobMatch,
     }
   );
+  return enforcePreferenceHardCap(result, hasPrefs);
 }

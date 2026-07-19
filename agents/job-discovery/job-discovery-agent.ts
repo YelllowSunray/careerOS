@@ -45,6 +45,15 @@ const DEFAULT_BOARDS: JobBoard[] = ["linkedin", "indeed"];
 const MAX_LISTINGS_TO_EVALUATE = 35;
 const MIN_FIT_TO_SAVE = 50;
 
+/** Prefer-full postings when the candidate stated preference constraints. */
+function postingTextTooThinForPreferences(text: string): boolean {
+  const body = text
+    .replace(/^[\s\S]*?JOB POSTING:\s*/i, "")
+    .replace(/SEARCH RESULT SUMMARY:[\s\S]*$/i, "")
+    .trim();
+  return body.length < 500;
+}
+
 async function listingsToMatchedJobs(
   listings: DiscoveredJobListing[],
   ctx: AgentContext,
@@ -135,6 +144,17 @@ async function listingsToMatchedJobs(
           continue;
         }
 
+        const hasPrefs = Boolean(context.profile.jobPreferences?.trim());
+        // Thin SERP-only text cannot verify org-type / hours / salary preferences.
+        if (hasPrefs && postingTextTooThinForPreferences(text)) {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (preferences): ${listing.title} @ ${listing.company} — posting too thin to verify preferences`
+          );
+          rejected++;
+          evaluatedListingKeys.push(identityKey);
+          continue;
+        }
+
         let matchResult;
         try {
           matchResult = await matchListingToCandidate(context, listing, text);
@@ -142,6 +162,16 @@ async function listingsToMatchedJobs(
           console.warn(
             `[Job discovery] [${platform}] AI match failed for ${listing.url}:`,
             e instanceof Error ? e.message : e
+          );
+          rejected++;
+          evaluatedListingKeys.push(identityKey);
+          continue;
+        }
+
+        // When prefs exist, only keep listings the model explicitly affirms.
+        if (hasPrefs && matchResult.preferencesMatch !== true) {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (preferences): ${listing.title} @ ${listing.company} — ${matchResult.preferenceAlignment ?? "does not satisfy job preferences"}${matchResult.employerType ? ` [${matchResult.employerType}]` : ""}`
           );
           rejected++;
           evaluatedListingKeys.push(identityKey);
@@ -368,10 +398,12 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
       const prioritized = [...fresh, ...alreadySeen];
 
       let toEvaluate = prioritized;
-      if (prioritized.length > MAX_LISTINGS_TO_EVALUATE) {
+      const hasPrefs = Boolean(input.context.profile.jobPreferences?.trim());
+      // Always preference-filter when prefs exist; otherwise only when over the eval cap.
+      if (hasPrefs || prioritized.length > MAX_LISTINGS_TO_EVALUATE) {
         const candidatePool = fresh.length > 0 ? fresh : prioritized;
         console.log(
-          `[Job discovery] Round ${round}: pre-filtering ${candidatePool.length} listings for ${searchPlan.inferredLevel}-level relevance…`
+          `[Job discovery] Round ${round}: pre-filtering ${candidatePool.length} listings for ${searchPlan.inferredLevel}-level relevance${hasPrefs ? " + job preferences" : ""}…`
         );
         toEvaluate = await filterListingsForCandidate(
           candidatePool,
@@ -387,6 +419,8 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
             `[Job discovery] Pre-filter removed all listings — using top ${MAX_LISTINGS_TO_EVALUATE} fresh results`
           );
           toEvaluate = candidatePool.slice(0, MAX_LISTINGS_TO_EVALUATE);
+        } else if (toEvaluate.length > MAX_LISTINGS_TO_EVALUATE) {
+          toEvaluate = toEvaluate.slice(0, MAX_LISTINGS_TO_EVALUATE);
         }
       }
 

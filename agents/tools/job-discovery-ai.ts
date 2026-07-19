@@ -74,16 +74,18 @@ REJECT (relevant=false, score<40):
 - Completely unrelated fields: sales, accounting, office admin, QA rater, medical, legal unless candidate has that background
 - Roles clearly above target level ${seniorityLabel(level)} (e.g. Senior/Lead/Principal/Staff/VP/Director/Head of when target is junior or mid)
 - Roles clearly below target level (e.g. intern or graduate role for senior+ profiles)
-- Roles that clearly conflict with stated job preferences (wrong employment type, location, or remote policy)
+- Roles/employers that conflict with THIS candidate's stated job preferences (interpret their free-text prefs — org/sector, employment type, location, remote)
+- When prefs name an org type, reject employers that are clearly a different type even if the work sounds thematically related
 
 ACCEPT (relevant=true, score 55+):
 - Job titles and skills align with candidate's actual background
 - Title seniority is appropriate for target level: ${seniorityLabel(level)}
+- Employer looks compatible with stated job preferences (when prefs exist)
 
 Work preference: ${workPref}
 Preferred locations: ${countries}
 Target seniority: ${seniorityLabel(level)}
-${jobPrefs ? `Job preferences: ${jobPrefs}` : ""}
+${jobPrefs ? `Job preferences (HARD for this candidate only): ${jobPrefs}` : "No special job preferences — do not filter by sector/org type."}
 
 CANDIDATE:
 ${candidateBlock}
@@ -105,9 +107,12 @@ ${listingBlock}`,
           kept.push(batch[r.index]);
         }
       }
-      // Indexes Gemini omitted — keep for full evaluation (don't silently discard).
-      for (let i = 0; i < batch.length; i++) {
-        if (!scoredIndexes.has(i)) kept.push(batch[i]);
+      // Without prefs, keep unscored indexes for full evaluation.
+      // With prefs, omit unscored — do not let preference conflicts sneak through.
+      if (!jobPrefs) {
+        for (let i = 0; i < batch.length; i++) {
+          if (!scoredIndexes.has(i)) kept.push(batch[i]);
+        }
       }
     } catch (e) {
       console.warn(

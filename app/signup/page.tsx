@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/auth-provider";
+import { formatAuthError } from "@/lib/auth/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,10 +22,21 @@ export default function SignupPage() {
     setError("");
     try {
       await signUp(email, password);
-    } catch {
-      setError("Could not create account");
+    } catch (e) {
+      console.error("[Signup]", e);
+      setError(formatAuthError(e, "Could not create account"));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleGoogle() {
+    setError("");
+    try {
+      await signInWithGoogle();
+    } catch (e) {
+      console.error("[Signup Google]", e);
+      setError(formatAuthError(e, "Google sign-in failed"));
     }
   }
 
@@ -70,7 +82,7 @@ export default function SignupPage() {
         <Button
           variant="secondary"
           className="w-full"
-          onClick={() => signInWithGoogle()}
+          onClick={() => void handleGoogle()}
         >
           Continue with Google
         </Button>

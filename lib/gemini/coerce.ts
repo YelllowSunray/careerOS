@@ -324,22 +324,43 @@ export function normalizeJobMatch(raw: unknown): unknown {
   ).trim();
 
   let preferencesMatch = o.preferencesMatch ?? o.preferences_match;
+  if (typeof preferencesMatch === "string") {
+    const s = preferencesMatch.toLowerCase().trim();
+    preferencesMatch = s === "true" || s === "yes" || s === "match";
+  }
   if (typeof preferencesMatch !== "boolean") {
-    preferencesMatch = preferenceAlignment
-      ? !/conflict|mismatch|does not match|doesn't match|not align/i.test(
-          preferenceAlignment
-        )
-      : undefined;
+    // Only infer false from explicit conflict language — never invent a true match.
+    if (
+      preferenceAlignment &&
+      /conflict|mismatch|does not match|doesn't match|not align|does not satisfy|fails preference/i.test(
+        preferenceAlignment
+      )
+    ) {
+      preferencesMatch = false;
+    } else {
+      preferencesMatch = undefined;
+    }
+  }
+
+  let fitScoreOut = fitScore;
+  if (preferencesMatch === false) {
+    fitScoreOut = Math.min(fitScoreOut, 40);
+    applyRecommendation = false;
   }
 
   return {
-    fitScore,
+    fitScore: fitScoreOut,
     strengths,
     missingSkills,
-    applyRecommendation,
-    reasoning: reasoning || `Overall fit score: ${fitScore}/100`,
-    ...(preferenceAlignment ? { preferenceAlignment } : {}),
-    ...(preferencesMatch !== undefined ? { preferencesMatch } : {}),
+    applyRecommendation: Boolean(applyRecommendation),
+    reasoning: reasoning || `Overall fit score: ${fitScoreOut}/100`,
+    preferenceAlignment:
+      preferenceAlignment || "Preference alignment not provided.",
+    preferencesMatch:
+      typeof preferencesMatch === "boolean" ? preferencesMatch : false,
+    ...(o.employerType || o.employer_type
+      ? { employerType: String(o.employerType ?? o.employer_type) }
+      : {}),
   };
 }
 

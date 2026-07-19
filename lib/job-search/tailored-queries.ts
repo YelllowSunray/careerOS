@@ -156,13 +156,14 @@ QUERY RULES:
 - MID: neutral titles without junior/senior unless preferences say otherwise
 - SENIOR+: include "senior" or appropriate level term in at least 1 query
 - NEVER use VP, Director, Head of, or C-level queries for junior/mid profiles
-- Factor job preferences (employment type, location, remote) into query wording
+- Factor job preferences into query wording ONLY when the candidate stated them
+- If preferences name an org/sector (NGO, charity, startup, healthcare, etc.), weave that sector signal into at least 2 queries using natural board keywords for THAT preference — do not add sector terms they did not ask for
 - Vary across best-fit role families; do not repeat the same query
 - Do NOT invent experience not evidenced in the profile
 
 Seed roles (adapt, do not copy verbatim if too narrow): ${seedRoles.join(", ") || "infer from resume"}
 Heuristic level hint: ${heuristicLevel}
-${jobPrefs ? `Job preferences: ${jobPrefs}` : ""}
+${jobPrefs ? `Job preferences (must shape queries when they name sector/org/hours/location): ${jobPrefs}` : "No special job preferences — do not bias toward any sector."}
 
 Return JSON with this exact shape:
 {
