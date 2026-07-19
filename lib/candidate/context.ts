@@ -122,6 +122,9 @@ export function formatContextForPrompt(ctx: CandidateContext, maxChars = 20000):
     ctx.profile.githubUrl ? `GitHub: ${ctx.profile.githubUrl}` : "",
     `Preferred country: ${getPrimaryCountry(ctx.profile.preferredCountries) ?? "not set"}`,
     `Work preference: ${ctx.profile.workPreference}`,
+    (ctx.profile.languagesSpoken ?? []).length > 0
+      ? `Languages spoken: ${(ctx.profile.languagesSpoken ?? []).join(", ")}`
+      : "Languages spoken: (not set — treat unknown; fail jobs that clearly require a specific language beyond optional English)",
     ctx.profile.jobPreferences?.trim()
       ? `Job preferences: ${ctx.profile.jobPreferences.trim()}`
       : "",

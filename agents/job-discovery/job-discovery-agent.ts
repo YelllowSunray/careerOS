@@ -2,7 +2,6 @@ import type { Agent } from "@/agents/core/agent";
 import type { AgentContext, AgentResult } from "@/agents/core/context";
 import {
   generateTailoredSearchPlan,
-  parseJobPosting,
   searchJobBoards,
   listingToJobFallback,
   dedupeListings,
@@ -11,25 +10,23 @@ import {
 } from "@/agents/tools/job-discovery";
 import { filterListingsForCandidate } from "@/agents/tools/job-discovery-ai";
 import { seniorityLabel } from "@/lib/job-search/tailored-queries";
-import { discoverJobsWithPlaywright } from "@/agents/tools/job-discovery-browser";
 import { discoverJobsFromCareerPages } from "@/agents/tools/job-discovery-career";
 import { validateListingIsJobPosting } from "@/agents/tools/job-discovery-ai";
 import { matchListingToCandidate } from "@/agents/tools/job-match";
-import {
-  createIndeedBrowser,
-  fetchListingContent,
-} from "@/agents/tools/listing-fetch";
-import type { Browser } from "playwright";
+import { fetchListingContent } from "@/agents/tools/listing-fetch";
+import { searchJobBoardsHttp } from "@/agents/tools/job-discovery-linkedin-guest";
 import { saveJob, saveJobMatch, getKnownJobIdentityKeys } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
 import { listingIdentityKey, stableJobId } from "@/lib/job-search/identity";
 import { toGuestLinkedInJobUrl, isLinkedInHostname } from "@/lib/job-search/linkedin-urls";
+import { supportsPlaywright } from "@/lib/runtime/capabilities";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { DiscoveredJobListing } from "@/agents/tools/job-discovery";
-import { searchPlaywrightJobBoards } from "@/agents/tools/job-discovery-social";
-import { isWorkflowPaused } from "@/lib/workflows/pause";
-import { getPrimaryCountry } from "@/lib/job-search/countries";
+import { isFindJobsStopped, isWorkflowPaused } from "@/lib/workflows/pause";
+import { getPrimaryCountry, effectiveRemotePreference } from "@/lib/job-search/countries";
 import { API_JOB_BOARDS, PLAYWRIGHT_JOB_BOARDS, type Job, type JobBoard, type JobMatch } from "@/lib/types";
+
+type ListingBrowser = import("playwright").Browser;
 
 export interface JobDiscoveryInput {
   context: CandidateContext;
@@ -42,8 +39,10 @@ export interface JobDiscoveryInput {
 }
 
 const DEFAULT_BOARDS: JobBoard[] = ["linkedin", "indeed"];
-const MAX_LISTINGS_TO_EVALUATE = 35;
+const MAX_LISTINGS_TO_EVALUATE = 20;
 const MIN_FIT_TO_SAVE = 50;
+/** Parallel detail-fetch + match workers (each still one Gemini match call). */
+const EVALUATE_CONCURRENCY = 3;
 
 /** Prefer-full postings when the candidate stated preference constraints. */
 function postingTextTooThinForPreferences(text: string): boolean {
@@ -53,6 +52,40 @@ function postingTextTooThinForPreferences(text: string): boolean {
     .trim();
   return body.length < 500;
 }
+
+function looksLikeJobPostingUrl(listing: DiscoveredJobListing): boolean {
+  const url = listing.url.toLowerCase();
+  return (
+    /linkedin\.com\/jobs\//.test(url) ||
+    /\/viewjob\?/.test(url) ||
+    /[?&]jk=/.test(url) ||
+    listing.platform === "linkedin" ||
+    listing.platform === "indeed"
+  );
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const n = Math.min(concurrency, Math.max(1, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
+
+type EvaluateOutcome =
+  | { kind: "matched"; job: Job; match: JobMatch; identityKey: string }
+  | { kind: "rejected"; identityKey: string }
+  | { kind: "skipped"; identityKey: string };
 
 async function listingsToMatchedJobs(
   listings: DiscoveredJobListing[],
@@ -84,7 +117,9 @@ async function listingsToMatchedJobs(
     `[Job discovery] ${knownKeys.size} jobs already saved — will skip matching for duplicates`
   );
 
-  const candidates = listings.filter((listing) => {
+  const hasPrefs = Boolean(context.profile.jobPreferences?.trim());
+
+  let candidates = listings.filter((listing) => {
     const key = listingIdentityKey(listing);
     if (knownKeys.has(key) || skipIdentityKeys.has(key)) {
       skippedKnown++;
@@ -93,34 +128,45 @@ async function listingsToMatchedJobs(
     return true;
   });
 
+  // Prefer LinkedIn (fuller HTTP guest pages) first.
+  candidates.sort((a, b) => {
+    const rank = (l: DiscoveredJobListing) =>
+      l.platform === "linkedin" ? 0 : l.platform === "indeed" ? 2 : 1;
+    return rank(a) - rank(b);
+  });
+
   if (skippedKnown > 0) {
     console.log(
       `[Job discovery] Skipping ${skippedKnown} already-evaluated listings; ${candidates.length} left to score`
     );
   }
 
-  const hasIndeed = candidates.some((l) => l.platform === "indeed");
-  let indeedBrowser: Browser | null = null;
-  if (hasIndeed) {
+  const toScore = candidates.slice(0, MAX_LISTINGS_TO_EVALUATE);
+  let listingBrowser: ListingBrowser | null = null;
+  const needsBrowserFallback =
+    supportsPlaywright() && toScore.some((l) => l.platform === "linkedin");
+  if (needsBrowserFallback) {
     try {
-      indeedBrowser = await createIndeedBrowser();
+      const { createListingBrowser } = await import("@/agents/tools/listing-fetch");
+      listingBrowser = await createListingBrowser();
     } catch (e) {
-      console.warn("[Job discovery] Failed to launch Indeed browser:", e);
+      console.warn("[Job discovery] Shared listing browser unavailable:", e);
     }
   }
 
+  let paused = false;
+
   try {
-    for (const listing of candidates.slice(0, MAX_LISTINGS_TO_EVALUATE)) {
-      if (workflowId && (await isWorkflowPaused(workflowId))) {
+    console.log(
+      `[Job discovery] Evaluating ${toScore.length} listings (concurrency ${EVALUATE_CONCURRENCY})`
+    );
+
+    const outcomes = await mapPool(toScore, EVALUATE_CONCURRENCY, async (listing) => {
+      if (workflowId && (await isFindJobsStopped(workflowId))) {
+        paused = true;
         return {
-          jobs,
-          matches,
-          evaluated: jobs.length + rejected + parseFailures + skippedKnown,
-          rejected,
-          parseFailures,
-          skippedKnown,
-          evaluatedListingKeys,
-          paused: true,
+          kind: "skipped" as const,
+          identityKey: listingIdentityKey(listing),
         };
       }
 
@@ -128,31 +174,27 @@ async function listingsToMatchedJobs(
       const identityKey = listingIdentityKey(listing);
 
       try {
-        const text = await fetchListingContent(listing, indeedBrowser);
+        const text = await fetchListingContent(listing, listingBrowser);
 
-        const validation = await validateListingIsJobPosting(
-          listing,
-          text,
-          ctx.userId
-        );
-        if (!validation.isJobPosting) {
-          console.log(
-            `[Job discovery] [${platform}] Not a job posting: ${listing.title} — ${validation.reason}`
+        if (!looksLikeJobPostingUrl(listing)) {
+          const validation = await validateListingIsJobPosting(
+            listing,
+            text,
+            ctx.userId
           );
-          rejected++;
-          evaluatedListingKeys.push(identityKey);
-          continue;
+          if (!validation.isJobPosting) {
+            console.log(
+              `[Job discovery] [${platform}] Not a job posting: ${listing.title} — ${validation.reason}`
+            );
+            return { kind: "rejected" as const, identityKey };
+          }
         }
 
-        const hasPrefs = Boolean(context.profile.jobPreferences?.trim());
-        // Thin SERP-only text cannot verify org-type / hours / salary preferences.
         if (hasPrefs && postingTextTooThinForPreferences(text)) {
+          // Soft prefs: thin text is OK — match on title/snippet/skills; prefs are informational.
           console.log(
-            `[Job discovery] [${platform}] Rejected (preferences): ${listing.title} @ ${listing.company} — posting too thin to verify preferences`
+            `[Job discovery] [${platform}] Thin posting for ${listing.title} @ ${listing.company} — matching without full preference verification`
           );
-          rejected++;
-          evaluatedListingKeys.push(identityKey);
-          continue;
         }
 
         let matchResult;
@@ -163,41 +205,27 @@ async function listingsToMatchedJobs(
             `[Job discovery] [${platform}] AI match failed for ${listing.url}:`,
             e instanceof Error ? e.message : e
           );
-          rejected++;
-          evaluatedListingKeys.push(identityKey);
-          continue;
+          return { kind: "rejected" as const, identityKey };
         }
 
-        // When prefs exist, only keep listings the model explicitly affirms.
-        if (hasPrefs && matchResult.preferencesMatch !== true) {
+        if (matchResult.languageRequirementMet === false) {
           console.log(
-            `[Job discovery] [${platform}] Rejected (preferences): ${listing.title} @ ${listing.company} — ${matchResult.preferenceAlignment ?? "does not satisfy job preferences"}${matchResult.employerType ? ` [${matchResult.employerType}]` : ""}`
+            `[Job discovery] [${platform}] Rejected (language): ${listing.title} @ ${listing.company} · requires [${(matchResult.requiredLanguages ?? []).join(", ") || "?"}] — ${matchResult.languageNotes || "candidate missing required language"}`
           );
-          rejected++;
-          evaluatedListingKeys.push(identityKey);
-          continue;
+          return { kind: "rejected" as const, identityKey };
         }
 
         if (matchResult.fitScore < MIN_FIT_TO_SAVE) {
           console.log(
-            `[Job discovery] [${platform}] Rejected (${matchResult.fitScore}): ${listing.title} @ ${listing.company}`
+            `[Job discovery] [${platform}] Rejected (${matchResult.fitScore}): ${listing.title} @ ${listing.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
           );
-          rejected++;
-          evaluatedListingKeys.push(identityKey);
-          continue;
+          return { kind: "rejected" as const, identityKey };
         }
 
-        let parsed: Awaited<ReturnType<typeof parseJobPosting>> | null = null;
-        try {
-          parsed = await parseJobPosting(text, listing.url, ctx.userId);
-        } catch {
-          parseFailures++;
-        }
-
+        // Skip extra parse Gemini call — listing + fetched text is enough to save.
         const fallback = listingToJobFallback(listing, text, ctx.userId, searchTerms);
         const jobId = stableJobId(ctx.userId, identityKey);
-        const rawApplicationUrl =
-          parsed?.applicationUrl || fallback.applicationUrl || listing.url;
+        const rawApplicationUrl = fallback.applicationUrl || listing.url;
         const applicationUrl = isLinkedInHostname(rawApplicationUrl)
           ? toGuestLinkedInJobUrl(rawApplicationUrl)
           : rawApplicationUrl;
@@ -205,18 +233,15 @@ async function listingsToMatchedJobs(
         const job: Job = {
           id: jobId,
           userId: ctx.userId,
-          title: parsed?.title || fallback.title,
-          company: parsed?.company || fallback.company,
+          title: fallback.title,
+          company: fallback.company,
           applicationUrl,
           source: listing.platform === "career_page" ? "career_page" : "job_board",
           sourcePlatform: listing.platform,
-          location: parsed?.location || fallback.location,
-          remoteType: parsed?.remoteType,
-          description: parsed?.description || fallback.description,
-          requirements: parsed?.requirements ?? fallback.requirements,
-          extractedSkills: parsed?.extractedSkills?.length
-            ? parsed.extractedSkills
-            : fallback.extractedSkills,
+          location: fallback.location,
+          description: fallback.description,
+          requirements: fallback.requirements,
+          extractedSkills: fallback.extractedSkills,
           discoveredVia: searchTerms.filter(
             (t) =>
               listing.title.toLowerCase().includes(t.toLowerCase()) ||
@@ -239,40 +264,57 @@ async function listingsToMatchedJobs(
           reasoning: matchResult.reasoning,
           preferenceAlignment: matchResult.preferenceAlignment,
           preferencesMatch: matchResult.preferencesMatch,
+          contributionScore: matchResult.contributionScore,
+          contributionNotes: matchResult.contributionNotes,
+          learningScore: matchResult.learningScore,
+          learningNotes: matchResult.learningNotes,
+          moneyScore: matchResult.moneyScore,
+          moneyNotes: matchResult.moneyNotes,
+          requiredLanguages: matchResult.requiredLanguages,
+          languageRequirementMet: matchResult.languageRequirementMet,
+          languageNotes: matchResult.languageNotes,
           matchedAt: nowIso(),
         };
 
-        await saveJob(job);
-        await saveJobMatch(match);
-        knownKeys.add(identityKey);
-        evaluatedListingKeys.push(identityKey);
-        jobs.push(job);
-        matches.push(match);
-
         console.log(
-          `[Job discovery] [${platform}] Matched (${matchResult.fitScore}): ${job.title} @ ${job.company}`
+          `[Job discovery] [${platform}] Matched (${matchResult.fitScore}): ${job.title} @ ${job.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
         );
+        return { kind: "matched" as const, job, match, identityKey };
       } catch (e) {
         console.warn(
           `[Job discovery] [${platform}] Skipped listing ${listing.url}:`,
           e instanceof Error ? e.message : e
         );
-        evaluatedListingKeys.push(identityKey);
+        return { kind: "skipped" as const, identityKey };
+      }
+    });
+
+    for (const outcome of outcomes) {
+      evaluatedListingKeys.push(outcome.identityKey);
+      if (outcome.kind === "matched") {
+        if (knownKeys.has(outcome.identityKey)) continue;
+        await saveJob(outcome.job);
+        await saveJobMatch(outcome.match);
+        knownKeys.add(outcome.identityKey);
+        jobs.push(outcome.job);
+        matches.push(outcome.match);
+      } else if (outcome.kind === "rejected") {
+        rejected++;
       }
     }
   } finally {
-    await indeedBrowser?.close();
+    await listingBrowser?.close().catch(() => undefined);
   }
 
   return {
     jobs,
     matches,
-    evaluated: Math.min(candidates.length, MAX_LISTINGS_TO_EVALUATE),
+    evaluated: toScore.length,
     rejected,
     parseFailures,
     skippedKnown,
     evaluatedListingKeys,
-    paused: false,
+    paused,
   };
 }
 
@@ -293,18 +335,27 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
         settings.jobBoards?.length ? settings.jobBoards : DEFAULT_BOARDS;
       const playwrightUrls = settings.playwrightJobSearchUrls ?? [];
       const careerUrls = settings.careerPageUrls ?? [];
+      const hasPrefs = Boolean(input.context.profile.jobPreferences?.trim());
 
       const apiBoards = boards.filter((b) =>
         (API_JOB_BOARDS as readonly string[]).includes(b)
       );
-      const socialBoards = boards.filter((b) =>
+      let socialBoards = boards.filter((b) =>
         (PLAYWRIGHT_JOB_BOARDS as readonly string[]).includes(b)
       ) as ("linkedin" | "indeed")[];
 
+      // Indeed SERP is often Cloudflare-walled and burns ~30s/query — LinkedIn guest is enough.
+      if (socialBoards.includes("indeed")) {
+        socialBoards = socialBoards.filter((b) => b !== "indeed");
+        console.log(
+          "[Job discovery] Skipping Indeed board search (unreliable locally; LinkedIn + APIs only)"
+        );
+      }
+
       const searchPlan = await generateTailoredSearchPlan(input.context);
       const searchTerms = searchPlan.queries;
-      if (workflowId && (await isWorkflowPaused(workflowId))) {
-        return { success: true, data: [], paused: true };
+      if (workflowId && (await isFindJobsStopped(workflowId))) {
+        return { success: true, data: [], paused: await isWorkflowPaused(workflowId) };
       }
 
       console.log(
@@ -331,8 +382,8 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
 
       const socialListings: DiscoveredJobListing[] = [];
       if (socialBoards.length > 0) {
-        if (workflowId && (await isWorkflowPaused(workflowId))) {
-          return { success: true, data: [], paused: true };
+        if (workflowId && (await isFindJobsStopped(workflowId))) {
+          return { success: true, data: [], paused: await isWorkflowPaused(workflowId) };
         }
         // LinkedIn pages ~25 results; Indeed ~10. Advance both each round so we
         // don't re-score the same first page forever.
@@ -340,29 +391,53 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
         console.log(
           `[Job discovery] Round ${round}: board pagination offset=${pageOffset}`
         );
-        const batches = await Promise.all(
-          searchTerms.map((query) =>
-            searchPlaywrightJobBoards(
-              query,
-              socialBoards,
-              ctx.userId,
-              {
-                preferredCountries: input.context.profile.preferredCountries,
-                workPreference: input.context.profile.workPreference,
-                experienceLevel: searchPlan.inferredLevel,
-                start: pageOffset,
-              }
-            )
-          )
+        const remotePref = effectiveRemotePreference(
+          input.context.profile.workPreference,
+          input.context.profile.jobPreferences
         );
-        socialListings.push(...batches.flat());
+        if (remotePref === "remote" && input.context.profile.workPreference !== "remote") {
+          console.log(
+            "[Job discovery] Treating search as remote (from job preferences text)"
+          );
+        }
+        const boardProfile = {
+          preferredCountries: input.context.profile.preferredCountries,
+          workPreference: remotePref,
+          experienceLevel: searchPlan.inferredLevel,
+          start: pageOffset,
+        };
+
+        if (supportsPlaywright()) {
+          const { searchPlaywrightJobBoards } = await import(
+            "@/agents/tools/job-discovery-social"
+          );
+          const batches = await Promise.all(
+            searchTerms.map((query) =>
+              searchPlaywrightJobBoards(query, socialBoards, ctx.userId, boardProfile)
+            )
+          );
+          socialListings.push(...batches.flat());
+        } else {
+          console.log(
+            "[Job discovery] Serverless mode: LinkedIn guest HTTP only (no Playwright)"
+          );
+          const batches = await Promise.all(
+            searchTerms.map((query) =>
+              searchJobBoardsHttp(query, socialBoards, ctx.userId, boardProfile)
+            )
+          );
+          socialListings.push(...batches.flat());
+        }
       }
 
       const playwrightListings: DiscoveredJobListing[] = [];
-      if (playwrightUrls.length > 0) {
+      if (playwrightUrls.length > 0 && supportsPlaywright()) {
+        const { discoverJobsWithPlaywright } = await import(
+          "@/agents/tools/job-discovery-browser"
+        );
         for (const query of searchTerms) {
-          if (workflowId && (await isWorkflowPaused(workflowId))) {
-            return { success: true, data: [], paused: true };
+          if (workflowId && (await isFindJobsStopped(workflowId))) {
+            return { success: true, data: [], paused: await isWorkflowPaused(workflowId) };
           }
           playwrightListings.push(
             ...(await discoverJobsWithPlaywright(
@@ -372,6 +447,10 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
             ))
           );
         }
+      } else if (playwrightUrls.length > 0) {
+        console.warn(
+          "[Job discovery] Skipping custom Playwright search URLs on serverless"
+        );
       }
 
       const careerListings =
@@ -398,7 +477,6 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
       const prioritized = [...fresh, ...alreadySeen];
 
       let toEvaluate = prioritized;
-      const hasPrefs = Boolean(input.context.profile.jobPreferences?.trim());
       // Always preference-filter when prefs exist; otherwise only when over the eval cap.
       if (hasPrefs || prioritized.length > MAX_LISTINGS_TO_EVALUATE) {
         const candidatePool = fresh.length > 0 ? fresh : prioritized;

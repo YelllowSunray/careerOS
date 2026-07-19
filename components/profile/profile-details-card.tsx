@@ -103,6 +103,14 @@ export function ProfileDetailsCard({
             <dd className="mt-1 text-sm capitalize">{profile.workPreference}</dd>
           </div>
           <div className="sm:col-span-2">
+            <dt className="text-sm text-zinc-500">Languages spoken</dt>
+            <dd className="mt-1 text-sm">
+              {(profile.languagesSpoken ?? []).length > 0
+                ? profile.languagesSpoken!.join(", ")
+                : "—"}
+            </dd>
+          </div>
+          <div className="sm:col-span-2">
             <dt className="text-sm text-zinc-500">Job preferences</dt>
             <dd className="mt-1 text-sm whitespace-pre-wrap">
               {profile.jobPreferences?.trim() || "—"}
@@ -219,6 +227,19 @@ export function ProfileDetailsCard({
               <option value="hybrid">Hybrid</option>
               <option value="onsite">On-site</option>
             </select>
+          </div>
+          <div className="sm:col-span-2">
+            <Label htmlFor="edit-languages">Languages spoken</Label>
+            <Input
+              id="edit-languages"
+              value={form.languagesSpoken}
+              onChange={(e) => update("languagesSpoken", e.target.value)}
+              placeholder="English, Dutch"
+              className="mt-1"
+            />
+            <p className="mt-1 text-xs text-zinc-500">
+              Comma-separated. Jobs that require a language you do not speak will be hidden.
+            </p>
           </div>
           <div className="sm:col-span-2">
             <Label htmlFor="edit-job-prefs">What type of job do you want?</Label>

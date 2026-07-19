@@ -39,8 +39,7 @@ export async function POST(request: NextRequest) {
     const workflow = await orchestrator.startFindJobs(userId, threshold);
     markFindJobsLive(workflow.id);
 
-    // Keep the isolate alive on Vercel; void alone gets frozen after the response.
-    after(async () => {
+    const run = async () => {
       try {
         await orchestrator.runFindJobs(userId, workflow.id, threshold);
       } catch (e) {
@@ -51,7 +50,15 @@ export async function POST(request: NextRequest) {
       } finally {
         markFindJobsDone(workflow.id);
       }
-    });
+    };
+
+    // Vercel freezes the isolate after the response unless after()/waitUntil is used.
+    // Locally prefer void so HMR doesn't confuse orphan detection as easily.
+    if (process.env.VERCEL) {
+      after(run);
+    } else {
+      void run();
+    }
 
     return jsonOk({
       workflowId: workflow.id,

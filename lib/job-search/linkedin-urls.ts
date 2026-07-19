@@ -9,15 +9,8 @@ export { BROWSER_UA };
 export function toGuestLinkedInJobUrl(url: string): string {
   const id = extractLinkedInJobId(url);
   if (!id) return url;
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.includes("linkedin.com")
-      ? parsed.hostname
-      : "www.linkedin.com";
-    return `https://${host}/jobs/view/${id}`;
-  } catch {
-    return `https://www.linkedin.com/jobs/view/${id}`;
-  }
+  // Always www — nl./de. hosts often 404 on guest job views.
+  return `https://www.linkedin.com/jobs/view/${id}`;
 }
 
 export function isLinkedInAuthWall(url: string): boolean {

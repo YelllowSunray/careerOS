@@ -343,10 +343,53 @@ export function normalizeJobMatch(raw: unknown): unknown {
   }
 
   let fitScoreOut = fitScore;
-  if (preferencesMatch === false) {
-    fitScoreOut = Math.min(fitScoreOut, 40);
-    applyRecommendation = false;
+  // Preferences are soft — do not crush scores on sector mismatch.
+
+  const scoreOrUndef = (raw: unknown): number | undefined => {
+    if (raw === undefined || raw === null || raw === "") return undefined;
+    return Math.min(100, Math.max(0, coerceNumber(raw, 0)));
+  };
+
+  const contributionScore = scoreOrUndef(
+    o.contributionScore ?? o.contribution_score ?? details?.contributionScore
+  );
+  const learningScore = scoreOrUndef(
+    o.learningScore ??
+      o.learning_score ??
+      o.growthPotential ??
+      o.growth_potential ??
+      details?.learningScore
+  );
+  const moneyScore = scoreOrUndef(
+    o.moneyScore ?? o.money_score ?? o.compensationScore ?? details?.moneyScore
+  );
+
+  const contributionNotes = String(
+    o.contributionNotes ?? o.contribution_notes ?? ""
+  ).trim();
+  const learningNotes = String(
+    o.learningNotes ?? o.learning_notes ?? o.growthNotes ?? o.growth_notes ?? ""
+  ).trim();
+  const moneyNotes = String(o.moneyNotes ?? o.money_notes ?? "").trim();
+
+  const requiredLanguages = coerceStringArray(
+    o.requiredLanguages ?? o.required_languages ?? details?.requiredLanguages
+  );
+
+  let languageRequirementMet =
+    o.languageRequirementMet ?? o.language_requirement_met;
+  if (typeof languageRequirementMet === "string") {
+    const s = languageRequirementMet.toLowerCase().trim();
+    languageRequirementMet = s === "true" || s === "yes" || s === "met";
   }
+  if (typeof languageRequirementMet !== "boolean") {
+    // Default open unless model listed hard requirements without a clear fail.
+    languageRequirementMet = true;
+  }
+
+  const languageNotes = String(
+    o.languageNotes ?? o.language_notes ?? ""
+  ).trim();
 
   return {
     fitScore: fitScoreOut,
@@ -357,10 +400,19 @@ export function normalizeJobMatch(raw: unknown): unknown {
     preferenceAlignment:
       preferenceAlignment || "Preference alignment not provided.",
     preferencesMatch:
-      typeof preferencesMatch === "boolean" ? preferencesMatch : false,
+      typeof preferencesMatch === "boolean" ? preferencesMatch : true,
+    requiredLanguages,
+    languageRequirementMet,
+    languageNotes,
     ...(o.employerType || o.employer_type
       ? { employerType: String(o.employerType ?? o.employer_type) }
       : {}),
+    contributionScore: contributionScore ?? fitScoreOut,
+    learningScore: learningScore ?? fitScoreOut,
+    moneyScore: moneyScore ?? 50,
+    contributionNotes,
+    learningNotes,
+    moneyNotes,
   };
 }
 

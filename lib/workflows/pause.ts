@@ -14,6 +14,12 @@ export async function isWorkflowPaused(workflowId: string): Promise<boolean> {
   return workflow?.status === "paused";
 }
 
+/** True when find_jobs should exit (paused, failed, completed, or missing). */
+export async function isFindJobsStopped(workflowId: string): Promise<boolean> {
+  const workflow = await getWorkflow(workflowId);
+  return !workflow || workflow.status !== "running";
+}
+
 export async function pauseWorkflow(workflowId: string): Promise<Workflow | null> {
   const workflow = await getWorkflow(workflowId);
   if (!workflow || workflow.status !== "running") return workflow;

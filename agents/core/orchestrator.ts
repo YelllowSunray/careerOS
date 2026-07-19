@@ -18,7 +18,11 @@ import {
   getLinkedInProfile,
 } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
-import { isWorkflowPaused, WorkflowPausedError } from "@/lib/workflows/pause";
+import {
+  isFindJobsStopped,
+  isWorkflowPaused,
+  WorkflowPausedError,
+} from "@/lib/workflows/pause";
 import {
   markFindJobsDone,
   markFindJobsLive,
@@ -297,8 +301,8 @@ export class WorkflowOrchestrator {
 
       const jobDiscoveryAgent = await loadJobDiscoveryAgent();
 
-      // Continuous search: keep discovering until the user pauses.
-      while (!(await isWorkflowPaused(workflowId))) {
+      // Continuous search: keep discovering until pause / fail / complete.
+      while (!(await isFindJobsStopped(workflowId))) {
         round++;
         console.log(`[Find jobs] Starting search round ${round}`);
         workflow.config = {
@@ -322,7 +326,13 @@ export class WorkflowOrchestrator {
           ctx
         );
 
-        if (discovery.paused || (await isWorkflowPaused(workflowId))) {
+        if (await isWorkflowPaused(workflowId)) {
+          throw new WorkflowPausedError();
+        }
+        if (await isFindJobsStopped(workflowId)) {
+          break;
+        }
+        if (discovery.paused) {
           throw new WorkflowPausedError();
         }
 

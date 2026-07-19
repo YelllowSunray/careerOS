@@ -40,6 +40,12 @@ export const jobMatchingAgent: Agent<JobMatchingInput, JobMatch[]> = {
         }
 
         const result = await matchJobToCandidate(job, input.context);
+        if (result.languageRequirementMet === false) {
+          console.log(
+            `[Job matching] Skipped (language): ${job.title} @ ${job.company} · requires [${(result.requiredLanguages ?? []).join(", ") || "?"}]`
+          );
+          continue;
+        }
         const match: JobMatch = {
           id: `match_${job.id}`,
           userId: ctx.userId,
@@ -51,6 +57,15 @@ export const jobMatchingAgent: Agent<JobMatchingInput, JobMatch[]> = {
           reasoning: result.reasoning,
           preferenceAlignment: result.preferenceAlignment,
           preferencesMatch: result.preferencesMatch,
+          contributionScore: result.contributionScore,
+          contributionNotes: result.contributionNotes,
+          learningScore: result.learningScore,
+          learningNotes: result.learningNotes,
+          moneyScore: result.moneyScore,
+          moneyNotes: result.moneyNotes,
+          requiredLanguages: result.requiredLanguages,
+          languageRequirementMet: result.languageRequirementMet,
+          languageNotes: result.languageNotes,
           matchedAt: nowIso(),
         };
         await saveJobMatch(match);

@@ -11,6 +11,20 @@ export interface ProfileFormValues {
   preferredCountry: string;
   workPreference: WorkPreference;
   jobPreferences: string;
+  /** Comma-separated language names */
+  languagesSpoken: string;
+}
+
+export function parseLanguagesSpoken(raw: string): string[] {
+  return [
+    ...new Set(
+      raw
+        .split(/[,;|/]+/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0)
+        .map((l) => l.replace(/\s+/g, " "))
+    ),
+  ];
 }
 
 export function profileToFormValues(
@@ -27,6 +41,7 @@ export function profileToFormValues(
     preferredCountry: profile.preferredCountries[0] ?? "",
     workPreference: profile.workPreference,
     jobPreferences: profile.jobPreferences ?? "",
+    languagesSpoken: (profile.languagesSpoken ?? []).join(", "),
   };
 }
 
@@ -34,6 +49,7 @@ export function formValuesToProfileUpdate(
   values: ProfileFormValues,
   existing: UserProfile
 ): Partial<UserProfile> {
+  const languages = parseLanguagesSpoken(values.languagesSpoken);
   return {
     name: values.name.trim(),
     email: values.email.trim(),
@@ -47,6 +63,7 @@ export function formValuesToProfileUpdate(
     preferredCountries: normalizePreferredCountries(values.preferredCountry),
     workPreference: values.workPreference,
     jobPreferences: values.jobPreferences.trim() || undefined,
+    languagesSpoken: languages.length > 0 ? languages : [],
     onboardingComplete: existing.onboardingComplete,
     settings: existing.settings,
     resume: existing.resume,

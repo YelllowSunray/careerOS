@@ -51,6 +51,15 @@ export async function PUT(request: NextRequest) {
         body.jobPreferences !== undefined
           ? String(body.jobPreferences).trim() || undefined
           : existing?.jobPreferences,
+      languagesSpoken: Array.isArray(body.languagesSpoken)
+        ? [
+            ...new Set(
+              (body.languagesSpoken as unknown[])
+                .map((l) => String(l).trim())
+                .filter((l) => l.length > 0)
+            ),
+          ]
+        : (existing?.languagesSpoken ?? []),
       resume: body.resume ?? existing?.resume,
       coverLetters: body.coverLetters ?? existing?.coverLetters ?? [],
       onboardingComplete: body.onboardingComplete ?? existing?.onboardingComplete ?? false,

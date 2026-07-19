@@ -237,11 +237,13 @@ export default function JobsPage() {
   const matchMap = new Map(matches.map((m) => [m.jobId, m]));
   const appByJobId = new Map(applications.map((a) => [a.jobId, a]));
 
-  const sortedJobs = [...jobs].sort((a, b) => {
-    const scoreA = matchMap.get(a.id)?.fitScore ?? -1;
-    const scoreB = matchMap.get(b.id)?.fitScore ?? -1;
-    return scoreB - scoreA;
-  });
+  const sortedJobs = [...jobs]
+    .filter((job) => matchMap.get(job.id)?.languageRequirementMet !== false)
+    .sort((a, b) => {
+      const scoreA = matchMap.get(a.id)?.fitScore ?? -1;
+      const scoreB = matchMap.get(b.id)?.fitScore ?? -1;
+      return scoreB - scoreA;
+    });
 
   const categoryTotals = aiUsage ? getCategoryTotals(aiUsage) : null;
   const jobSearchUsage = categoryTotals?.job_search ?? null;
@@ -256,7 +258,7 @@ export default function JobsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Jobs</h1>
           <p className="text-zinc-500">
-            AI searches LinkedIn/Indeed and scores each listing against your resume, LinkedIn profile, portfolio, and job preferences.
+            AI searches LinkedIn/Indeed and scores each listing against your resume, LinkedIn profile, portfolio, languages, and job preferences.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -481,15 +483,84 @@ export default function JobsPage() {
                         className={`rounded-lg px-3 py-2 ${
                           match.preferencesMatch
                             ? "bg-emerald-50 text-emerald-900"
-                            : "bg-amber-50 text-amber-900"
+                            : "bg-sky-50 text-sky-900"
                         }`}
                       >
                         <p className="font-medium">
                           {match.preferencesMatch
-                            ? "Matches your job preferences"
-                            : "Preference mismatch"}
+                            ? "Aligned with stated preferences"
+                            : "Outside stated preferences (kept for growth potential)"}
                         </p>
                         <p className="mt-0.5">{match.preferenceAlignment}</p>
+                      </div>
+                    )}
+                    {(match.contributionScore != null ||
+                      match.learningScore != null ||
+                      match.moneyScore != null) && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          {
+                            label: "Contribute",
+                            score: match.contributionScore,
+                            notes: match.contributionNotes,
+                            tone: "bg-emerald-50 text-emerald-950",
+                          },
+                          {
+                            label: "Learn",
+                            score: match.learningScore,
+                            notes: match.learningNotes,
+                            tone: "bg-violet-50 text-violet-950",
+                          },
+                          {
+                            label: "Money",
+                            score: match.moneyScore,
+                            notes: match.moneyNotes,
+                            tone: "bg-amber-50 text-amber-950",
+                          },
+                        ].map((pillar) => (
+                          <div
+                            key={pillar.label}
+                            className={`rounded-lg px-2.5 py-2 ${pillar.tone}`}
+                            title={pillar.notes || undefined}
+                          >
+                            <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">
+                              {pillar.label}
+                            </p>
+                            <p className="text-lg font-semibold tabular-nums">
+                              {pillar.score != null ? pillar.score : "—"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(match.contributionNotes ||
+                      match.learningNotes ||
+                      match.moneyNotes) && (
+                      <div className="space-y-1.5 text-xs text-zinc-600">
+                        {match.contributionNotes && (
+                          <p>
+                            <span className="font-medium text-emerald-800">
+                              Contribute:{" "}
+                            </span>
+                            {match.contributionNotes}
+                          </p>
+                        )}
+                        {match.learningNotes && (
+                          <p>
+                            <span className="font-medium text-violet-800">
+                              Learn:{" "}
+                            </span>
+                            {match.learningNotes}
+                          </p>
+                        )}
+                        {match.moneyNotes && (
+                          <p>
+                            <span className="font-medium text-amber-800">
+                              Money:{" "}
+                            </span>
+                            {match.moneyNotes}
+                          </p>
+                        )}
                       </div>
                     )}
                     <p className="text-zinc-600">{match.reasoning}</p>

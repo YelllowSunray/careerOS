@@ -90,6 +90,8 @@ export interface UserProfile {
   workPreference: WorkPreference;
   /** Free-text: employment type, schedule, location, industry, seniority, etc. */
   jobPreferences?: string;
+  /** Languages the candidate speaks (e.g. English, Dutch). Used as a hard job-eligibility filter. */
+  languagesSpoken?: string[];
   resume?: {
     storagePath: string;
     fileName: string;
@@ -219,10 +221,24 @@ export interface JobMatch {
   missingSkills: MissingSkill[];
   applyRecommendation: boolean;
   reasoning: string;
-  /** How this job aligns with the candidate's stated job preferences */
+  /** How this job aligns with the candidate's stated job preferences (soft signal) */
   preferenceAlignment?: string;
-  /** Whether the role broadly matches stated job preferences */
+  /** Whether the role broadly matches stated job preferences (informational) */
   preferencesMatch?: boolean;
+  /** AI pillar: how much value the candidate can contribute soon (0-100) */
+  contributionScore?: number;
+  contributionNotes?: string;
+  /** AI pillar: capability / ladder growth (0-100) */
+  learningScore?: number;
+  learningNotes?: string;
+  /** AI pillar: compensation quality / upside (0-100) */
+  moneyScore?: number;
+  moneyNotes?: string;
+  /** Languages the posting hard-requires (from AI) */
+  requiredLanguages?: string[];
+  /** Whether candidate languages satisfy hard requirements */
+  languageRequirementMet?: boolean;
+  languageNotes?: string;
   matchedAt: string;
 }
 

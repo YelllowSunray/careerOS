@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { extractJobListingsWithAi } from "./job-discovery-ai";
+import { searchLinkedInGuestApi } from "./job-discovery-linkedin-guest";
 import {
   logBoardError,
   logBoardInfo,
@@ -244,86 +245,23 @@ async function extractIndeedListingsFromDom(
 async function isIndeedBlocked(page: Page): Promise<boolean> {
   const blocked = await page.evaluate(() => {
     const title = document.title.toLowerCase();
+    const url = window.location.href.toLowerCase();
     const text = document.body?.innerText?.toLowerCase() ?? "";
     return (
       title.includes("security check") ||
       title.includes("blocked") ||
       title.includes("niet gevonden") ||
+      title.includes("inloggen") ||
+      title.includes("sign in") ||
+      url.includes("secure.indeed.com/auth") ||
+      url.includes("account/login") ||
       text.includes("verify you are human") ||
       text.includes("captcha") ||
-      text.includes("unusual traffic")
+      text.includes("unusual traffic") ||
+      text.includes("extra verificatie vereist")
     );
   });
   return blocked;
-}
-
-/** LinkedIn guest API — no login; page HTML is parsed by AI. */
-async function searchLinkedInGuestApi(
-  query: string,
-  location: string,
-  userId?: string,
-  experienceLevel?: ExperienceLevel,
-  start = 0
-): Promise<DiscoveredJobListing[]> {
-  const expFilter = experienceLevel
-    ? linkedInExperienceFilter(experienceLevel)
-    : "";
-  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent(location)}&start=${Math.max(0, start)}${expFilter}&sortBy=DD`;
-  try {
-    logBoardInfo("linkedin", `Guest API request`, { url, query, location, start });
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": BROWSER_UA,
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!res.ok) {
-      logBoardWarn("linkedin", `Guest API HTTP ${res.status} for "${query}"`);
-      return [];
-    }
-
-    const html = await res.text();
-    const $ = cheerio.load(html);
-    const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, 25000);
-    const links: { url: string; text: string }[] = [];
-    $("a[href]").each((_, el) => {
-      const href = $(el).attr("href");
-      const linkText = $(el).text().replace(/\s+/g, " ").trim();
-      if (!href || !linkText) return;
-      const absolute = href.startsWith("http")
-        ? href
-        : `https://www.linkedin.com${href}`;
-      links.push({ url: absolute, text: linkText });
-    });
-
-    logBoardInfo("linkedin", `Guest API response`, {
-      query,
-      start,
-      htmlChars: html.length,
-      textChars: text.length,
-      linkCount: links.length,
-    });
-
-    const listings = await extractJobListingsWithAi({
-      pageUrl: url,
-      pageText: text,
-      links: links.slice(0, 150),
-      searchQuery: query,
-      platform: "linkedin",
-      userId,
-    });
-
-    logBoardInfo("linkedin", `Guest API extracted listings`, {
-      query,
-      start,
-      listings: listings.length,
-    });
-    return listings;
-  } catch (e) {
-    logBoardError("linkedin", `Guest API failed for "${query}"`, e);
-    return [];
-  }
 }
 
 /** LinkedIn — guest API first, Playwright + AI fallback. */
@@ -354,15 +292,26 @@ export async function searchLinkedInJobs(
       location,
       userId,
       options?.experienceLevel,
-      start
+      start,
+      options?.workPreference ?? "any"
     );
-    if (guest.length >= 3) {
+    if (guest.length >= 1) {
       logBoardInfo("linkedin", `Using guest API results`, {
         query,
         start,
         listings: guest.length,
       });
       return guest;
+    }
+
+    // Deep pagination with an empty guest page usually means end of results.
+    // Playwright often reloads page 0 and re-returns duplicates — skip it.
+    if (start > 0) {
+      logBoardInfo("linkedin", `Guest API empty at offset ${start} — skipping Playwright fallback`, {
+        query,
+        start,
+      });
+      return [];
     }
 
     const remoteFilter = linkedInRemoteFilter(options?.workPreference ?? "any");
@@ -448,6 +397,16 @@ export async function searchIndeedJobs(
     }
 
     await dismissIndeedOverlays(page);
+
+    if (await isIndeedBlocked(page)) {
+      const diagnostics = await getPageDiagnostics(page);
+      logBoardError(
+        "indeed",
+        `Blocked by login / security check for "${query}" — skipping`,
+        diagnostics
+      );
+      return [];
+    }
 
     let selectorFound = false;
     try {

@@ -22,7 +22,7 @@ const tailoredSearchSchema = z.object({
     "staff",
     "principal",
   ]),
-  searchQueries: z.array(z.string()).min(1).max(3),
+  searchQueries: z.array(z.string()).min(1).max(4),
   rationale: z.string(),
 });
 
@@ -139,37 +139,35 @@ export async function generateTailoredSearchPlan(
 
   try {
     const result = await generateStructured(
-      `Design a tailored job board search plan for this candidate.
+      `Design a FULLY AI-powered job board search plan for this candidate's IDEAL NEXT ROLES.
 
-STEP 1 — Infer REALISTIC target experience level from resume + portfolio:
-- Count years, job titles, project scope, and depth of ownership
-- Do not inflate level based on skills alone — use evidence of roles held
+Read their entire resume, LinkedIn, portfolio, and preferences. Infer where they can climb — not only the next title in their current job branch.
+
+STEP 1 — Infer REALISTIC target experience level from evidence of ownership/years/titles:
 - Levels: junior | mid | senior | staff | principal
+- Aim one step up when the profile supports ladder climb
 
-STEP 2 — Produce exactly 3 search queries for LinkedIn/Indeed keyword boxes.
+STEP 2 — Produce exactly 4 LinkedIn/Indeed keyword queries that explore IDEAL futures.
 
-QUERY RULES:
-- 2-5 words each; ready to paste into job board search
-- Role titles only (good: "junior frontend developer") — NOT bare tech (bad: "react")
-- JUNIOR: at least 2 queries MUST include "junior", "entry level", or "graduate"
-- JUNIOR: 3rd query may drop the prefix to catch unlabeled roles (e.g. "frontend developer")
-- MID: neutral titles without junior/senior unless preferences say otherwise
-- SENIOR+: include "senior" or appropriate level term in at least 1 query
-- NEVER use VP, Director, Head of, or C-level queries for junior/mid profiles
-- Factor job preferences into query wording ONLY when the candidate stated them
-- If preferences name an org/sector (NGO, charity, startup, healthcare, etc.), weave that sector signal into at least 2 queries using natural board keywords for THAT preference — do not add sector terms they did not ask for
-- Vary across best-fit role families; do not repeat the same query
-- Do NOT invent experience not evidenced in the profile
+QUERY RULES (AI judgment only — no fixed title lists):
+- 2-5 words each; role-style phrases boards understand
+- At most ONE query may closely mirror their current job title/branch
+- At least TWO queries MUST explore different branches/families where their transferable strengths could contribute AND they would learn/climb (you invent the paths from the profile — e.g. from compliance into risk, regulatory affairs, governance, privacy, policy, fincrime leadership, etc. ONLY if credible for THIS person)
+- At least ONE query should target a clear seniority step up (or broader scope leadership) when mid+
+- NEVER force VP/Director/C-level for junior/mid without leadership evidence
+- Preferences are soft: at most one query may reflect preferred sector/comp language
+- Vary queries; do not repeat the same role family four times
+- Do NOT invent experience; DO invent plausible NEXT role directions supported by their skills/achievements
 
-Seed roles (adapt, do not copy verbatim if too narrow): ${seedRoles.join(", ") || "infer from resume"}
+Seed role hints (optional — you may diverge when better paths exist): ${seedRoles.join(", ") || "infer freely from resume"}
 Heuristic level hint: ${heuristicLevel}
-${jobPrefs ? `Job preferences (must shape queries when they name sector/org/hours/location): ${jobPrefs}` : "No special job preferences — do not bias toward any sector."}
+${jobPrefs ? `Job preferences (soft bias only): ${jobPrefs}` : "No special job preferences."}
 
-Return JSON with this exact shape:
+Return JSON:
 {
   "inferredExperienceLevel": "mid",
-  "searchQueries": ["query one", "query two", "query three"],
-  "rationale": "short explanation"
+  "searchQueries": ["query one", "query two", "query three", "query four"],
+  "rationale": "short explanation of the ladder / cross-branch strategy"
 }
 
 CANDIDATE:
@@ -188,9 +186,9 @@ ${candidateBlock}`,
 
     if (queries.length >= 2) {
       return {
-        queries: [...new Set(queries)].slice(0, 3),
+        queries: [...new Set(queries)].slice(0, 4),
         inferredLevel: result.inferredExperienceLevel,
-        rationale: result.rationale?.trim() || "AI-tailored search plan",
+        rationale: result.rationale?.trim() || "AI-tailored ideal-next-role search",
       };
     }
   } catch (e) {

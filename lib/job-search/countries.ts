@@ -107,6 +107,26 @@ export function linkedInRemoteFilter(workPreference: string): string {
   return workPreference === "remote" ? "&f_WT=2" : "";
 }
 
+/**
+ * Prefer structured workPreference; also honor free-text jobPreferences that
+ * clearly ask for remote (common when workPreference is still "any").
+ */
+export function effectiveRemotePreference(
+  workPreference: string,
+  jobPreferences?: string | null
+): string {
+  if (workPreference === "remote") return "remote";
+  const prefs = jobPreferences?.toLowerCase() ?? "";
+  if (
+    /\b(fully\s+)?remote\b/.test(prefs) ||
+    /\bremote\s+(only|job|role|work|position|full[- ]?time)\b/.test(prefs) ||
+    /\bfull[- ]?time\s+remote\b/.test(prefs)
+  ) {
+    return "remote";
+  }
+  return workPreference;
+}
+
 /** LinkedIn experience-level filter (f_E). Complements keyword seniority in queries. */
 export function linkedInExperienceFilter(level: string): string {
   const filters: Record<string, string> = {

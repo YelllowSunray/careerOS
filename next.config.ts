@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     "@google-cloud/firestore",
     "pdf-parse",
     "playwright",
+    "playwright-core",
     "mammoth",
     "word-extractor",
   ],

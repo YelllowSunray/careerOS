@@ -9,6 +9,9 @@ import type { Job } from "@/lib/types";
 
 const matchSchema = z.object({
   fitScore: z.number(),
+  contributionScore: z.number(),
+  learningScore: z.number(),
+  moneyScore: z.number(),
   strengths: z.array(z.string()),
   missingSkills: z.array(
     z.object({
@@ -18,8 +21,16 @@ const matchSchema = z.object({
   ),
   applyRecommendation: z.boolean(),
   reasoning: z.string(),
+  contributionNotes: z.string(),
+  learningNotes: z.string(),
+  moneyNotes: z.string(),
   preferenceAlignment: z.string(),
   preferencesMatch: z.boolean(),
+  /** Languages the posting requires (empty if none / English-only optional / not stated). */
+  requiredLanguages: z.array(z.string()),
+  /** True if candidate speaks every required language (or no hard language req). */
+  languageRequirementMet: z.boolean(),
+  languageNotes: z.string(),
   employerType: z.string().optional(),
 });
 
@@ -33,60 +44,94 @@ function buildHolisticMatchPrompt(
   const workPref = context.profile.workPreference;
   const countries = getPrimaryCountry(context.profile.preferredCountries) ?? "any";
   const jobPrefs = context.profile.jobPreferences?.trim();
+  const spoken = (context.profile.languagesSpoken ?? []).filter(Boolean);
   const targetLevel = inferExperienceLevelFromContext(context);
+
+  const languageBlock =
+    spoken.length > 0
+      ? `CANDIDATE LANGUAGES SPOKEN (HARD ELIGIBILITY — not soft preferences):
+${spoken.join(", ")}
+
+Rules:
+- Infer requiredLanguages from the posting (explicit "must speak Dutch", "Dutch required", bilingual NL/EN as hard req, etc.).
+- Nice-to-have / preferred / "Dutch is a plus" → do NOT treat as required.
+- Posting written in Dutch does NOT alone mean Dutch is required unless the role requires speaking/working in Dutch.
+- If English-only is fine or no language requirement is stated → requiredLanguages=[] and languageRequirementMet=true.
+- languageRequirementMet=false ONLY when a hard required language is missing from the candidate list (dialects/aliases OK, e.g. Nederlands≈Dutch).
+- If languagesSpoken is empty, treat as unable to confirm — fail any clear non-English hard requirement.`
+      : `CANDIDATE LANGUAGES SPOKEN: (not set)
+If the posting has a clear hard language requirement other than optional English, set languageRequirementMet=false.
+If no hard language requirement, languageRequirementMet=true and requiredLanguages=[].`;
 
   const preferenceBlock = jobPrefs
     ? `
-CANDIDATE JOB PREFERENCES (free text — interpret as HARD CONSTRAINTS for THIS candidate only):
+CANDIDATE JOB PREFERENCES (free text — soft context for all three pillars, not a veto):
 """
 ${jobPrefs}
 """
-
-PREFERENCE ENFORCEMENT (AI-interpreted from the text above — do not invent constraints they did not state):
-1. Classify the employer from company name + posting into a short employerType label
-   (examples of labels: ngo_charity, non_profit, government, municipality, province,
-   commercial, consultancy, housing_corporation, education, healthcare_provider, other).
-2. Decide preferencesMatch by comparing THAT classification to what THIS candidate asked for.
-3. If preferences name an org/sector type (NGO, charity, startup, fintech, etc.):
-   - preferencesMatch=true ONLY when the employer clearly fits that type.
-   - Adjacent "social impact" work at a different org type does NOT satisfy an org-type preference.
-   - Example interpretation only (apply the same logic to whatever THEY wrote):
-     if they asked for charities/NGOs, then gemeente/provincie/government, commercial firms,
-     woningcorporaties, and for-profit consultancies → preferencesMatch=false.
-4. Also enforce hours, salary, remote/onsite, location if they stated them.
-5. If the posting is too thin to verify a stated preference (especially org type), preferencesMatch=false.
-6. When preferencesMatch=false: fitScore MUST be ≤40 and applyRecommendation=false.
-   Skills overlap NEVER overrides a preference conflict.`
+Interpret salary/comp lines in prefs as input to moneyScore.
+Interpret sector/role lines as soft bias on contribution & learning — never hard-reject adjacent sectors.`
     : `
-No free-text job preferences on file.
+No free-text job preferences.
 Work preference: ${workPref}
 Preferred locations: ${countries}
 Set preferencesMatch=true and preferenceAlignment="No specific job preferences stated."`;
 
-  return `You are an expert career matcher finding IDEAL fits between a candidate and a job.
+  return `You are an expert career coach finding the candidate's IDEAL NEXT ROLE — not a clone of their current job title.
 
-Read the candidate's FULL resume, LinkedIn profile, and portfolio.
-Read the FULL job posting — title, company/employer type, requirements, seniority, employment type, location/remote.
+Core idea: ladder climbing and better contribution × learning × money. The next role does NOT need to stay in the same job family/branch.
+Example: a Compliance Officer may ideal-match Senior Compliance, but also Risk, AML leadership, Regulatory Affairs, Governance, Privacy, Policy, Legal Ops, FinCrime, or other paths their FULL profile supports — if they can contribute soon, learn upward, and earn well.
 
-TARGET SENIORITY: ${seniorityLabel(targetLevel)} — penalize roles clearly above or below this level.
+THE THREE PILLARS (score each 0-100 from the full profile + posting — pure judgment, no keyword rules):
+
+1) CONTRIBUTION — Can they create real value here soon?
+   Map transferable strengths (judgment, ownership, domain fluency, stakeholder skills) onto THIS role's needs — even if the title differs from their current one.
+   High = meaningful impact within months; low = years of catch-up or wrong craft entirely.
+
+2) LEARNING — Does this raise their ceiling?
+   New scope, harder problems, leadership, new markets/tools/licenses they can absorb, clear step up the ladder.
+   Same-title lateral moves with no new scope score lower than a different-branch stretch that expands capability.
+
+3) MONEY — Compensation quality vs level and prefs.
+   Use disclosed pay when present; otherwise infer plausibly from level/employer/market/location and note uncertainty.
+   Factor compensation hints in preferences. Do not invent exact figures.
+
+OVERALL fitScore (0-100):
+- Maximize the beautiful balance of contribution × learning × money.
+- Prefer IDEAL next jobs: stronger ladder + solid contribution + good money.
+- DO NOT require the job title or branch to match their current title.
+- DO NOT penalize cross-branch moves when transfer is credible from the full profile.
+- Mild seniority stretch (+1) is welcome when contribution stays credible.
+- Only tank scores for clear wrong-career mismatches (entirely unrelated profession).
+
+TARGET SENIORITY BASELINE: ${seniorityLabel(targetLevel)} (stretch up is encouraged when earned by the profile).
+
 ${preferenceBlock}
 
-Score holistically:
-- Skills/experience fit from resume + LinkedIn + portfolio
-- Seniority appropriateness
-- Preference compliance (hard when preferences exist)
+${languageBlock}
 
-fitScore is 0-100 (≤40 = preference conflict or poor fit, 70+ = good, 85+ = strong)
+preferencesMatch: soft true/false vs stated prefs (informational only — never veto an ideal ladder move).
+languageRequirementMet: HARD gate — false means this job must not be shown to the candidate.
+employerType: short label from the posting.
 
-Return ONLY valid JSON with this exact shape:
+Return ONLY valid JSON:
 {
   "fitScore": 0-100,
+  "contributionScore": 0-100,
+  "learningScore": 0-100,
+  "moneyScore": 0-100,
   "strengths": ["string"],
   "missingSkills": [{ "skill": "string", "isHardRequirement": true/false }],
   "applyRecommendation": true/false,
-  "reasoning": "2-4 sentences on skills/experience fit",
-  "preferenceAlignment": "1-2 sentences naming employer type vs stated preferences",
+  "reasoning": "2-4 sentences on why this is (or isn't) an ideal next role — include branch/ladder angle",
+  "contributionNotes": "1-2 sentences",
+  "learningNotes": "1-2 sentences",
+  "moneyNotes": "1-2 sentences (note if pay inferred vs disclosed)",
+  "preferenceAlignment": "1-2 sentences (soft)",
   "preferencesMatch": true/false,
+  "requiredLanguages": ["string"],
+  "languageRequirementMet": true/false,
+  "languageNotes": "1 sentence on language eligibility",
   "employerType": "short label"
 }
 
@@ -97,49 +142,42 @@ JOB:
 ${jobBlock}`;
 }
 
-/** Catch models that set preferencesMatch=true while describing a conflict. */
-function alignmentImpliesConflict(alignment: string): boolean {
-  const t = alignment.toLowerCase();
-  return (
-    /\b(conflict|conflicts|conflicting|mismatch|mismatches|incompatible|contrary|does not (align|match|fit)|doesn't (align|match|fit)|do not (align|match|fit)|don't (align|match|fit)|not (a |an )?(good |ideal )?fit|fails? to (meet|match)|against .+preference)\b/.test(
-      t
-    ) ||
-    /\bhowever\b.+\b(conflict|commercial|consultancy|for-profit|it services)\b/.test(t)
-  );
+function clampScore(n: unknown, fallback = 0): number {
+  const v = typeof n === "number" ? n : Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.min(100, Math.max(0, Math.round(v)));
 }
 
-function enforcePreferenceHardCap(
+function normalizeMatchResult(
   result: JobMatchResult,
   hasPrefs: boolean
 ): JobMatchResult {
-  if (!hasPrefs) {
-    return {
-      ...result,
-      preferencesMatch: result.preferencesMatch ?? true,
-      preferenceAlignment:
-        result.preferenceAlignment || "No specific job preferences stated.",
-    };
-  }
-
-  const alignment =
-    result.preferenceAlignment ||
-    "Could not confirm the employer matches stated job preferences.";
-  const matchOk =
-    result.preferencesMatch === true && !alignmentImpliesConflict(alignment);
-
-  if (!matchOk) {
-    return {
-      ...result,
-      preferencesMatch: false,
-      fitScore: Math.min(result.fitScore, 40),
-      applyRecommendation: false,
-      preferenceAlignment: alignment,
-    };
-  }
-  return result;
+  return {
+    ...result,
+    fitScore: clampScore(result.fitScore),
+    contributionScore: clampScore(result.contributionScore),
+    learningScore: clampScore(result.learningScore),
+    moneyScore: clampScore(result.moneyScore, 50),
+    contributionNotes: result.contributionNotes?.trim() || "",
+    learningNotes: result.learningNotes?.trim() || "",
+    moneyNotes: result.moneyNotes?.trim() || "",
+    preferencesMatch: hasPrefs
+      ? Boolean(result.preferencesMatch)
+      : (result.preferencesMatch ?? true),
+    preferenceAlignment:
+      result.preferenceAlignment ||
+      (hasPrefs
+        ? "Preference alignment not detailed."
+        : "No specific job preferences stated."),
+    requiredLanguages: Array.isArray(result.requiredLanguages)
+      ? result.requiredLanguages.map((l) => String(l).trim()).filter(Boolean)
+      : [],
+    languageRequirementMet: Boolean(result.languageRequirementMet),
+    languageNotes: result.languageNotes?.trim() || "",
+  };
 }
 
-/** Deep AI match: full resume + LinkedIn + portfolio vs full job posting text. */
+/** Deep AI match: contribution × learning × money balance. */
 export async function matchListingToCandidate(
   context: CandidateContext,
   listing: {
@@ -168,7 +206,7 @@ ${postingText.slice(0, 14000)}`;
       coerce: normalizeJobMatch,
     }
   );
-  return enforcePreferenceHardCap(result, hasPrefs);
+  return normalizeMatchResult(result, hasPrefs);
 }
 
 export async function matchJobToCandidate(job: Job, context: CandidateContext) {
@@ -190,5 +228,5 @@ export async function matchJobToCandidate(job: Job, context: CandidateContext) {
       coerce: normalizeJobMatch,
     }
   );
-  return enforcePreferenceHardCap(result, hasPrefs);
+  return normalizeMatchResult(result, hasPrefs);
 }

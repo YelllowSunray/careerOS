@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardTitle } from "@/components/ui/card";
 import { normalizePreferredCountries } from "@/lib/job-search/countries";
+import { parseLanguagesSpoken } from "@/components/profile/profile-form";
 
 export default function OnboardingPage() {
   const { user } = useAuth();
@@ -28,6 +29,7 @@ export default function OnboardingPage() {
   const [preferredCountry, setPreferredCountry] = useState("");
   const [workPreference, setWorkPreference] = useState("any");
   const [jobPreferences, setJobPreferences] = useState("");
+  const [languagesSpoken, setLanguagesSpoken] = useState("English");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeError, setResumeError] = useState("");
 
@@ -65,6 +67,7 @@ export default function OnboardingPage() {
           preferredCountries: normalizePreferredCountries(preferredCountry),
           workPreference,
           jobPreferences: jobPreferences.trim() || undefined,
+          languagesSpoken: parseLanguagesSpoken(languagesSpoken),
           onboardingComplete: true,
         }),
       });
@@ -166,6 +169,19 @@ export default function OnboardingPage() {
               </select>
             </div>
             <div>
+              <Label htmlFor="languages">Languages spoken</Label>
+              <Input
+                id="languages"
+                value={languagesSpoken}
+                onChange={(e) => setLanguagesSpoken(e.target.value)}
+                placeholder="English, Dutch"
+                required
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                Comma-separated. Jobs that require a language you do not speak will not be shown.
+              </p>
+            </div>
+            <div>
               <Label htmlFor="job-prefs">What type of job do you want?</Label>
               <textarea
                 id="job-prefs"
@@ -181,7 +197,10 @@ export default function OnboardingPage() {
             </div>
             <div className="flex gap-3">
               <Button variant="secondary" onClick={() => setStep(1)}>Back</Button>
-              <Button onClick={() => setStep(3)} disabled={!preferredCountry}>
+              <Button
+                onClick={() => setStep(3)}
+                disabled={!preferredCountry || parseLanguagesSpoken(languagesSpoken).length === 0}
+              >
                 Continue
               </Button>
             </div>

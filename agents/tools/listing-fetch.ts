@@ -1,11 +1,19 @@
-import { chromium, type Browser } from "playwright";
 import type { DiscoveredJobListing } from "./job-discovery";
 import { fetchPageText, isBlockedPageText, htmlToText } from "./html";
 import { logBoardInfo, logBoardWarn } from "./job-board-log";
 import { toGuestLinkedInJobUrl } from "@/lib/job-search/linkedin-urls";
+import { supportsPlaywright } from "@/lib/runtime/capabilities";
+
+type Browser = import("playwright").Browser;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+async function loadChromium() {
+  if (!supportsPlaywright()) return null;
+  const { chromium } = await import("playwright");
+  return chromium;
+}
 
 export function buildListingPostingText(
   listing: DiscoveredJobListing,
@@ -244,51 +252,63 @@ async function fetchLinkedInDetailWithPlaywright(
 
 /**
  * Fetch posting text.
- * LinkedIn/Indeed: Playwright extracts the real description (not page chrome).
- * Other boards: HTTP + cheerio.
+ * Prefer fast HTTP for LinkedIn guest pages; Playwright only when needed.
+ * Indeed detail pages are usually bot-blocked — use SERP snippet instead.
  */
 export async function fetchListingContent(
   listing: DiscoveredJobListing,
   browser?: Browser | null
 ): Promise<string> {
-  const platform =
+  const platformName =
     listing.platform === "indeed"
       ? "indeed"
       : listing.platform === "linkedin"
         ? "linkedin"
         : "linkedin";
 
-  const ownsBrowser = !browser && (listing.platform === "indeed" || listing.platform === "linkedin");
+  // Indeed view pages almost always return cookie/Cloudflare chrome via Playwright.
+  if (listing.platform === "indeed") {
+    if (listing.snippet && listing.snippet.length > 80) {
+      logBoardInfo("indeed", `Using SERP snippet for matching (skip detail scrape)`, {
+        title: listing.title,
+        snippetChars: listing.snippet.length,
+      });
+      return buildListingPostingText(listing, "");
+    }
+    throw new Error(`No usable posting content for indeed: ${listing.url}`);
+  }
+
+  // LinkedIn: HTTP guest page first (fast), Playwright only if thin/blocked.
+  if (listing.platform === "linkedin") {
+    try {
+      const url = toGuestLinkedInJobUrl(listing.url);
+      const text = await fetchPageText(url);
+      if (!isBlockedPageText(text) && text.length > 400) {
+        logBoardInfo("linkedin", `Detail page fetched via HTTP`, {
+          url,
+          chars: text.length,
+        });
+        return buildListingPostingText(listing, prioritizeListingBrief(text));
+      }
+      logBoardWarn(
+        "linkedin",
+        `HTTP detail thin/blocked (${text.length} chars), trying Playwright`,
+        { url }
+      );
+    } catch (e) {
+      logBoardWarn("linkedin", `HTTP detail fetch failed`, e);
+    }
+  }
+
+  const ownsBrowser =
+    !browser && supportsPlaywright() && listing.platform === "linkedin";
   let localBrowser: Browser | null = browser ?? null;
 
   try {
     if (ownsBrowser) {
-      localBrowser = await chromium.launch({ headless: true });
-    }
-
-    if (listing.platform === "indeed" && localBrowser) {
-      try {
-        const playwrightText = await fetchIndeedDetailWithPlaywright(
-          localBrowser,
-          listing.url
-        );
-        if (playwrightText.length > 300 && !isBlockedPageText(playwrightText)) {
-          logBoardInfo("indeed", `Detail page fetched via Playwright`, {
-            url: listing.url,
-            chars: playwrightText.length,
-          });
-          return buildListingPostingText(
-            listing,
-            prioritizeListingBrief(playwrightText)
-          );
-        }
-        logBoardWarn(
-          "indeed",
-          `Playwright detail unusable (${playwrightText.length} chars), using SERP snippet`,
-          { url: listing.url, preview: playwrightText.slice(0, 120) }
-        );
-      } catch (e) {
-        logBoardWarn("indeed", `Playwright detail fetch failed`, e);
+      const chromium = await loadChromium();
+      if (chromium) {
+        localBrowser = await chromium.launch({ headless: true });
       }
     }
 
@@ -309,30 +329,24 @@ export async function fetchListingContent(
       }
     }
 
-    if (listing.platform !== "indeed") {
+    if (listing.platform !== "linkedin") {
       try {
-        // Prefer canonical guest job URL for LinkedIn HTTP fallback.
-        const url =
-          listing.platform === "linkedin"
-            ? toGuestLinkedInJobUrl(listing.url)
-            : listing.url;
-        const text = await fetchPageText(url);
+        const text = await fetchPageText(listing.url);
         if (!isBlockedPageText(text) && text.length > 200) {
-          // Try to salvage description from HTML-ish noise via prioritization.
           return buildListingPostingText(listing, prioritizeListingBrief(text));
         }
         logBoardWarn(
-          platform,
+          platformName,
           `HTTP fetch returned blocked/short content (${text.length} chars)`,
-          { url }
+          { url: listing.url }
         );
       } catch (e) {
-        logBoardWarn(platform, `HTTP fetch failed`, e);
+        logBoardWarn(platformName, `HTTP fetch failed`, e);
       }
     }
 
     if (listing.snippet && listing.snippet.length > 80) {
-      logBoardInfo(platform, `Using SERP snippet for matching`, {
+      logBoardInfo(platformName, `Using SERP snippet for matching`, {
         title: listing.title,
         snippetChars: listing.snippet.length,
       });
@@ -350,11 +364,19 @@ export async function fetchListingContent(
 }
 
 export async function createIndeedBrowser(): Promise<Browser> {
+  const chromium = await loadChromium();
+  if (!chromium) {
+    throw new Error("Playwright is not available in this environment");
+  }
   return chromium.launch({ headless: true });
 }
 
 /** Shared browser for LinkedIn + Indeed detail fetches. */
 export async function createListingBrowser(): Promise<Browser> {
+  const chromium = await loadChromium();
+  if (!chromium) {
+    throw new Error("Playwright is not available in this environment");
+  }
   return chromium.launch({ headless: true });
 }
 

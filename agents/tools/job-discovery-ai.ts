@@ -59,33 +59,34 @@ export async function filterListingsForCandidate(
 
     try {
       const result = await generateStructured(
-        `Score whether each job listing is a plausible match for this candidate.
-Use the candidate's resume, portfolio, skills, and experience level.
+        `Score whether each listing could be an IDEAL NEXT ROLE for this candidate.
+Use the FULL resume/portfolio — do not require the same job title or branch as their current role.
 
-Return JSON object (not a bare array) with this exact shape:
+Return JSON:
 {
   "results": [
     { "index": 0, "relevant": true, "relevanceScore": 70 }
   ]
 }
-Use the listing index numbers from LISTINGS below. Include one result per listing.
+One result per listing index.
 
 REJECT (relevant=false, score<40):
-- Completely unrelated fields: sales, accounting, office admin, QA rater, medical, legal unless candidate has that background
-- Roles clearly above target level ${seniorityLabel(level)} (e.g. Senior/Lead/Principal/Staff/VP/Director/Head of when target is junior or mid)
-- Roles clearly below target level (e.g. intern or graduate role for senior+ profiles)
-- Roles/employers that conflict with THIS candidate's stated job preferences (interpret their free-text prefs — org/sector, employment type, location, remote)
-- When prefs name an org type, reject employers that are clearly a different type even if the work sounds thematically related
+- Entirely unrelated professions with no transferable path from their profile
+- Extreme seniority gaps (intern for senior+; C-suite for junior with no leadership evidence)
 
 ACCEPT (relevant=true, score 55+):
-- Job titles and skills align with candidate's actual background
-- Title seniority is appropriate for target level: ${seniorityLabel(level)}
-- Employer looks compatible with stated job preferences (when prefs exist)
+- Same branch OR different branch where transferable strengths make contribution plausible soon
+- Seniority step-ups and broader-scope roles that climb the ladder
+- Roles that expand capabilities (learning) and look commercially sensible (money)
+- Do NOT reject just because the title differs from "Compliance Officer" (or whatever they hold now)
+- Preferences are soft bias only
+
+relevanceScore = AI judgment of contribution × learning × money potential as an ideal next step.
 
 Work preference: ${workPref}
 Preferred locations: ${countries}
-Target seniority: ${seniorityLabel(level)}
-${jobPrefs ? `Job preferences (HARD for this candidate only): ${jobPrefs}` : "No special job preferences — do not filter by sector/org type."}
+Target seniority baseline: ${seniorityLabel(level)}
+${jobPrefs ? `Job preferences (soft): ${jobPrefs}` : "No special job preferences."}
 
 CANDIDATE:
 ${candidateBlock}
@@ -107,12 +108,9 @@ ${listingBlock}`,
           kept.push(batch[r.index]);
         }
       }
-      // Without prefs, keep unscored indexes for full evaluation.
-      // With prefs, omit unscored — do not let preference conflicts sneak through.
-      if (!jobPrefs) {
-        for (let i = 0; i < batch.length; i++) {
-          if (!scoredIndexes.has(i)) kept.push(batch[i]);
-        }
+      // Keep unscored indexes for full evaluation — prefs are soft.
+      for (let i = 0; i < batch.length; i++) {
+        if (!scoredIndexes.has(i)) kept.push(batch[i]);
       }
     } catch (e) {
       console.warn(
