@@ -10,8 +10,13 @@ function activityTimestamp(workflow: Workflow): number {
   return new Date(raw).getTime();
 }
 
-/** Firestore says running but this Node process is not executing the loop. */
+/**
+ * Firestore says running but this Node process is not executing the loop.
+ * Disabled on Vercel: serverless isolates each have an empty in-memory set,
+ * so every running workflow would look orphaned.
+ */
 export function isOrphanedFindJobs(workflow: Workflow | null): boolean {
+  if (process.env.VERCEL) return false;
   if (!workflow || workflow.type !== "find_jobs") return false;
   if (workflow.status !== "running") return false;
   return !isFindJobsLive(workflow.id);

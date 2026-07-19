@@ -2,8 +2,7 @@ import { NextRequest } from "next/server";
 import { verifyAuth, jsonError, jsonOk, AuthError } from "@/lib/api/auth";
 import { getLatestWorkflow, updateWorkflow } from "@/services/firestore";
 import { pauseWorkflow } from "@/lib/workflows/pause";
-import { isOrphanedFindJobs } from "@/lib/workflows/live";
-import { isWorkflowStale } from "@/lib/workflows/stale";
+import { isOrphanedFindJobs, isWorkflowStale } from "@/lib/workflows/stale";
 import { nowIso } from "@/lib/utils/dates";
 import type { WorkflowType } from "@/lib/types";
 

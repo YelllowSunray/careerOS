@@ -1,11 +1,4 @@
 import { createContext } from "@/agents/core/context";
-import { resumeAgent } from "@/agents/resume/resume-agent";
-import { portfolioAgent } from "@/agents/portfolio/portfolio-agent";
-import { linkedInProfileAgent } from "@/agents/linkedin/linkedin-profile-agent";
-import { candidateProfileAgent } from "@/agents/candidate-profile/candidate-profile-agent";
-import { jobDiscoveryAgent } from "@/agents/job-discovery/job-discovery-agent";
-import { generateApplicationMaterials } from "@/agents/tools/application-generate";
-import { runBrowserAgent } from "@/agents/browser/browser-agent";
 import { buildCandidateContext } from "@/lib/candidate/context";
 import {
   coverLetterToPdfBuffer,
@@ -31,6 +24,24 @@ import {
   markFindJobsLive,
 } from "@/lib/workflows/live";
 import type { Workflow, WorkflowStep, JobMatch } from "@/lib/types";
+
+/** Lazy-load agents so API routes can boot without Playwright/NFT crashes on Vercel. */
+async function loadResumeAgent() {
+  return (await import("@/agents/resume/resume-agent")).resumeAgent;
+}
+async function loadPortfolioAgent() {
+  return (await import("@/agents/portfolio/portfolio-agent")).portfolioAgent;
+}
+async function loadLinkedInProfileAgent() {
+  return (await import("@/agents/linkedin/linkedin-profile-agent")).linkedInProfileAgent;
+}
+async function loadCandidateProfileAgent() {
+  return (await import("@/agents/candidate-profile/candidate-profile-agent"))
+    .candidateProfileAgent;
+}
+async function loadJobDiscoveryAgent() {
+  return (await import("@/agents/job-discovery/job-discovery-agent")).jobDiscoveryAgent;
+}
 
 function createWorkflow(
   userId: string,
@@ -98,6 +109,7 @@ export class WorkflowOrchestrator {
     try {
       if (profile.resume?.storagePath) {
         await updateStep(wf, "resume_processing", "running");
+        const resumeAgent = await loadResumeAgent();
         const result = await resumeAgent.execute(
           {
             storagePath: profile.resume.storagePath,
@@ -118,6 +130,7 @@ export class WorkflowOrchestrator {
 
       await updateStep(wf, "portfolio_crawling", "running");
       const portfolioUrls = profile.portfolioUrls.map(normalizeUrl).filter(Boolean);
+      const portfolioAgent = await loadPortfolioAgent();
       for (const url of portfolioUrls) {
         const siteId = `site_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         await portfolioAgent.execute({ url, siteId }, ctx);
@@ -126,6 +139,7 @@ export class WorkflowOrchestrator {
 
       await updateStep(wf, "linkedin_profile", "running");
       if (profile.linkedInUrl?.trim()) {
+        const linkedInProfileAgent = await loadLinkedInProfileAgent();
         const li = await linkedInProfileAgent.execute(undefined, ctx);
         await updateStep(
           wf,
@@ -158,6 +172,7 @@ export class WorkflowOrchestrator {
       }
 
       await updateStep(wf, "candidate_profile", "running");
+      const candidateProfileAgent = await loadCandidateProfileAgent();
       const profileResult = await candidateProfileAgent.execute(undefined, ctx);
       await updateStep(
         wf,
@@ -261,6 +276,7 @@ export class WorkflowOrchestrator {
       }
 
       if (!context.structuredProfile) {
+        const candidateProfileAgent = await loadCandidateProfileAgent();
         const gen = await candidateProfileAgent.execute(undefined, ctx);
         if (gen.data) {
           context.structuredProfile = gen.data;
@@ -278,6 +294,8 @@ export class WorkflowOrchestrator {
       let evaluatedListingKeys = Array.isArray(workflow.config.evaluatedListingKeys)
         ? [...(workflow.config.evaluatedListingKeys as string[])]
         : [];
+
+      const jobDiscoveryAgent = await loadJobDiscoveryAgent();
 
       // Continuous search: keep discovering until the user pauses.
       while (!(await isWorkflowPaused(workflowId))) {
@@ -438,6 +456,9 @@ export class WorkflowOrchestrator {
       console.log(
         `[Apply] Generating tailored materials for ${job.title} @ ${job.company}`
       );
+      const { generateApplicationMaterials } = await import(
+        "@/agents/tools/application-generate"
+      );
       const materials = await generateApplicationMaterials(job, context, match);
 
       if (materials.coverLetter.trim()) {
@@ -480,6 +501,8 @@ export class WorkflowOrchestrator {
       });
 
       console.log(`[Apply] Starting AI browser agent for ${job.applicationUrl}`);
+      // Dynamic import keeps Playwright out of find-jobs / profile serverless bundles.
+      const { runBrowserAgent } = await import("@/agents/browser/browser-agent");
       const session = await runBrowserAgent({
         applicationId: appId,
         applicationUrl: job.applicationUrl,
@@ -554,6 +577,7 @@ export class WorkflowOrchestrator {
         application.updatedAt = nowIso();
         await saveApplication(application);
 
+        const { runBrowserAgent } = await import("@/agents/browser/browser-agent");
         const session = await runBrowserAgent({
           applicationId: appId,
           applicationUrl: application.applicationUrl,

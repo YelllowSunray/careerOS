@@ -1,9 +1,9 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { verifyAuth, jsonError, jsonOk, AuthError } from "@/lib/api/auth";
 import { orchestrator } from "@/agents/core/orchestrator";
 import { getLatestWorkflow, getProfile, updateWorkflow } from "@/services/firestore";
-import { isOrphanedFindJobs, markFindJobsDone, markFindJobsLive } from "@/lib/workflows/live";
-import { isWorkflowStale } from "@/lib/workflows/stale";
+import { markFindJobsDone, markFindJobsLive } from "@/lib/workflows/live";
+import { isOrphanedFindJobs, isWorkflowStale } from "@/lib/workflows/stale";
 import { nowIso } from "@/lib/utils/dates";
 
 export const maxDuration = 300;
@@ -39,19 +39,19 @@ export async function POST(request: NextRequest) {
     const workflow = await orchestrator.startFindJobs(userId, threshold);
     markFindJobsLive(workflow.id);
 
-    // Fire-and-forget so continuous search is not capped by route maxDuration /
-    // after(). Pause is the only intentional stop.
-    void orchestrator
-      .runFindJobs(userId, workflow.id, threshold)
-      .catch((e) => {
+    // Keep the isolate alive on Vercel; void alone gets frozen after the response.
+    after(async () => {
+      try {
+        await orchestrator.runFindJobs(userId, workflow.id, threshold);
+      } catch (e) {
         console.error(
           `[Find jobs] Background workflow failed (${workflow.id}):`,
           e
         );
-      })
-      .finally(() => {
+      } finally {
         markFindJobsDone(workflow.id);
-      });
+      }
+    });
 
     return jsonOk({
       workflowId: workflow.id,

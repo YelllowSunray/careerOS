@@ -97,6 +97,17 @@ JOB:
 ${jobBlock}`;
 }
 
+/** Catch models that set preferencesMatch=true while describing a conflict. */
+function alignmentImpliesConflict(alignment: string): boolean {
+  const t = alignment.toLowerCase();
+  return (
+    /\b(conflict|conflicts|conflicting|mismatch|mismatches|incompatible|contrary|does not (align|match|fit)|doesn't (align|match|fit)|do not (align|match|fit)|don't (align|match|fit)|not (a |an )?(good |ideal )?fit|fails? to (meet|match)|against .+preference)\b/.test(
+      t
+    ) ||
+    /\bhowever\b.+\b(conflict|commercial|consultancy|for-profit|it services)\b/.test(t)
+  );
+}
+
 function enforcePreferenceHardCap(
   result: JobMatchResult,
   hasPrefs: boolean
@@ -109,15 +120,20 @@ function enforcePreferenceHardCap(
         result.preferenceAlignment || "No specific job preferences stated.",
     };
   }
-  if (result.preferencesMatch !== true) {
+
+  const alignment =
+    result.preferenceAlignment ||
+    "Could not confirm the employer matches stated job preferences.";
+  const matchOk =
+    result.preferencesMatch === true && !alignmentImpliesConflict(alignment);
+
+  if (!matchOk) {
     return {
       ...result,
       preferencesMatch: false,
       fitScore: Math.min(result.fitScore, 40),
       applyRecommendation: false,
-      preferenceAlignment:
-        result.preferenceAlignment ||
-        "Could not confirm the employer matches stated job preferences.",
+      preferenceAlignment: alignment,
     };
   }
   return result;

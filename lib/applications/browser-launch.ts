@@ -5,7 +5,13 @@ import { chromium, type Browser, type BrowserContext } from "playwright";
 import { BROWSER_UA } from "@/lib/job-search/linkedin-urls";
 import { isLinkedInLoggedIn } from "@/lib/applications/linkedin-session";
 
-const DEFAULT_PROFILE_DIR = path.join(process.cwd(), ".data/linkedin-browser");
+// turbopackIgnore: avoid Next NFT tracing the entire project from process.cwd().
+const DEFAULT_PROFILE_DIR = path.join(
+  process.env.VERCEL
+    ? os.tmpdir()
+    : /* turbopackIgnore: true */ process.cwd(),
+  process.env.VERCEL ? "career-os-linkedin-browser" : ".data/linkedin-browser"
+);
 const COOKIES_PATH = path.join(DEFAULT_PROFILE_DIR, "linkedin-cookies.json");
 
 const STEALTH_ARGS = [
