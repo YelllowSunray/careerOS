@@ -19,6 +19,12 @@ export const metadata: Metadata = {
   description: "Automatically discover jobs and apply on your behalf",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{

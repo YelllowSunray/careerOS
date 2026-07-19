@@ -77,10 +77,10 @@ export default function AdminPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Shield className="h-6 w-6" />
+            <Shield className="h-6 w-6 shrink-0" />
             Admin — Gemini usage
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
@@ -92,7 +92,7 @@ export default function AdminPage() {
           variant="secondary"
           onClick={() => void load()}
           disabled={loading}
-          className="shrink-0"
+          className="w-full sm:w-auto sm:shrink-0"
         >
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           Refresh

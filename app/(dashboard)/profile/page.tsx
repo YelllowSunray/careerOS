@@ -259,16 +259,17 @@ export default function ProfilePage() {
     : resume?.extracted.technologies ?? [];
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+    <div className="space-y-6 sm:space-y-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Profile</h1>
-          <p className="text-zinc-500">Your AI-built candidate knowledge graph</p>
+          <p className="text-sm text-zinc-500 sm:text-base">Your AI-built candidate knowledge graph</p>
         </div>
         <Button
           variant="secondary"
           onClick={handleReprocess}
           disabled={reprocessing || isProcessing}
+          className="w-full sm:w-auto sm:shrink-0"
         >
           {reprocessing || isProcessing ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -445,7 +446,7 @@ export default function ProfilePage() {
                 {(profile.coverLetters ?? []).map((letter) => (
                   <li
                     key={letter.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-zinc-100 px-3 py-2"
+                    className="flex flex-col gap-2 rounded-lg border border-zinc-100 px-3 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
                   >
                     <div className="flex min-w-0 items-start gap-2">
                       <FileText className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
@@ -515,9 +516,9 @@ export default function ProfilePage() {
           {candidate?.inferredRoles?.length ? (
             <ul className="mt-4 space-y-2">
               {candidate.inferredRoles.map((r) => (
-                <li key={r.role} className="flex items-center justify-between text-sm">
-                  <span>{r.role}</span>
-                  <span className="text-zinc-500">{r.confidence}% confidence</span>
+                <li key={r.role} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
+                  <span className="min-w-0 break-words">{r.role}</span>
+                  <span className="shrink-0 text-zinc-500">{r.confidence}% confidence</span>
                 </li>
               ))}
             </ul>

@@ -253,15 +253,15 @@ export default function JobsPage() {
     (coverLetterUsage?.requestCount ?? 0) > 0;
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="space-y-6 sm:space-y-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Jobs</h1>
-          <p className="text-zinc-500">
+          <p className="mt-1 text-sm text-zinc-500 sm:text-base">
             AI searches LinkedIn/Indeed and scores each listing against your resume, LinkedIn profile, portfolio, languages, and job preferences.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           {isDev && (
             <Button
               variant="danger"
@@ -296,7 +296,7 @@ export default function JobsPage() {
               )}
             </Button>
           ) : (
-            <Button onClick={handleFindJobs}>
+            <Button onClick={handleFindJobs} className="w-full sm:w-auto">
               Find Jobs
             </Button>
           )}
@@ -437,9 +437,9 @@ export default function JobsPage() {
 
             return (
               <Card key={job.id} className={match && match.fitScore < 50 ? "opacity-60" : ""}>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <CardTitle>{job.title}</CardTitle>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <CardTitle className="break-words">{job.title}</CardTitle>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <p className="text-sm text-zinc-500">
                         {job.company} · {job.location}
@@ -466,14 +466,14 @@ export default function JobsPage() {
                     </div>
                   </div>
                   {match ? (
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-zinc-900">
+                    <div className="shrink-0 text-right">
+                      <div className="text-xl font-bold text-zinc-900 sm:text-2xl">
                         {match.fitScore}
                       </div>
                       <div className="text-xs text-zinc-500">fit score</div>
                     </div>
                   ) : (
-                    <div className="text-right text-xs text-zinc-400">Not scored</div>
+                    <div className="shrink-0 text-right text-xs text-zinc-400">Not scored</div>
                   )}
                 </div>
                 {match && (
@@ -497,7 +497,7 @@ export default function JobsPage() {
                     {(match.contributionScore != null ||
                       match.learningScore != null ||
                       match.moneyScore != null) && (
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         {[
                           {
                             label: "Contribute",
@@ -520,13 +520,13 @@ export default function JobsPage() {
                         ].map((pillar) => (
                           <div
                             key={pillar.label}
-                            className={`rounded-lg px-2.5 py-2 ${pillar.tone}`}
+                            className={`rounded-lg px-2 py-2 sm:px-2.5 ${pillar.tone}`}
                             title={pillar.notes || undefined}
                           >
-                            <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">
+                            <p className="text-[10px] font-medium uppercase tracking-wide opacity-80 sm:text-[11px]">
                               {pillar.label}
                             </p>
-                            <p className="text-lg font-semibold tabular-nums">
+                            <p className="text-base font-semibold tabular-nums sm:text-lg">
                               {pillar.score != null ? pillar.score : "—"}
                             </p>
                           </div>
@@ -638,10 +638,10 @@ export default function JobsPage() {
                 {letter && (
                   <div className="mt-4 space-y-3">
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50/80">
-                      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
                         <button
                           type="button"
-                          className="text-left text-sm font-medium text-zinc-800 hover:underline"
+                          className="min-w-0 text-left text-sm font-medium text-zinc-800 hover:underline"
                           onClick={() =>
                             setExpandedLetters((prev) => ({
                               ...prev,
@@ -659,7 +659,7 @@ export default function JobsPage() {
                         </button>
                         <Button
                           variant="ghost"
-                          className="h-8 px-2 text-zinc-600"
+                          className="h-8 shrink-0 px-2 text-zinc-600"
                           onClick={() => copyCoverLetter(letter)}
                         >
                           <Copy className="mr-1.5 h-3.5 w-3.5" />

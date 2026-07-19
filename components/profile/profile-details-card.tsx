@@ -63,15 +63,15 @@ export function ProfileDetailsCard({
 
   return (
     <Card className="lg:col-span-2">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <CardTitle>Profile details</CardTitle>
         {!editing ? (
-          <Button variant="ghost" className="text-sm" onClick={startEdit}>
+          <Button variant="ghost" className="self-start text-sm sm:self-auto" onClick={startEdit}>
             <Pencil className="mr-2 h-4 w-4" />
             Edit
           </Button>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={cancelEdit} disabled={saving}>
               Cancel
             </Button>
@@ -220,7 +220,7 @@ export function ProfileDetailsCard({
               onChange={(e) =>
                 update("workPreference", e.target.value)
               }
-              className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
             >
               <option value="any">Any</option>
               <option value="remote">Remote</option>
@@ -249,7 +249,7 @@ export function ProfileDetailsCard({
               onChange={(e) => update("jobPreferences", e.target.value)}
               placeholder="e.g. Full-time, remote, frontend roles in the Netherlands. Open to hybrid in Amsterdam."
               rows={3}
-              className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
             />
             <p className="mt-1 text-xs text-zinc-500">
               Used by AI during job search and matching — employment type, location, remote policy, industry, seniority, etc.

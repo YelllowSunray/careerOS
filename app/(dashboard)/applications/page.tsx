@@ -40,10 +40,10 @@ export default function ApplicationsPage() {
   const appliedCount = applications.filter((a) => a.status === "applied").length;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div>
         <h1 className="text-2xl font-semibold">Applications</h1>
-        <p className="mt-1 text-zinc-500">
+        <p className="mt-1 text-sm text-zinc-500 sm:text-base">
           {appliedCount} submitted · Apply from the Jobs page — cover letters and
           form answers are generated when you click Apply.
         </p>
@@ -62,12 +62,12 @@ export default function ApplicationsPage() {
         <div className="space-y-4">
           {applications.map((app) => (
             <Card key={app.id}>
-              <div className="flex items-start justify-between">
-                <div>
-                  <CardTitle>{app.jobTitle}</CardTitle>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <CardTitle className="break-words">{app.jobTitle}</CardTitle>
                   <p className="text-sm text-zinc-500">{app.company}</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
                   <span className="text-sm text-zinc-500">Fit: {app.fitScore}</span>
                   <StatusBadge status={app.status} />
                 </div>

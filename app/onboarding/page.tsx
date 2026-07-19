@@ -92,7 +92,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl py-12">
+    <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
       <Card>
         <CardTitle>Set up your profile</CardTitle>
         <p className="mt-1 text-sm text-zinc-500">
@@ -189,7 +189,7 @@ export default function OnboardingPage() {
                 onChange={(e) => setJobPreferences(e.target.value)}
                 placeholder="e.g. Full-time, remote, frontend roles in the Netherlands"
                 rows={3}
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
               />
               <p className="mt-1 text-xs text-zinc-500">
                 Employment type, location, remote policy, industry — AI uses this when searching and scoring jobs.

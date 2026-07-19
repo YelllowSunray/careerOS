@@ -215,7 +215,7 @@ export default function SettingsPage() {
             onChange={(e) => setPlaywrightUrls(e.target.value)}
             placeholder="https://example.com/jobs?q={query}"
             rows={3}
-            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
           />
         </div>
 
@@ -230,7 +230,7 @@ export default function SettingsPage() {
             onChange={(e) => setCareerUrls(e.target.value)}
             placeholder="https://boards.greenhouse.io/example"
             rows={3}
-            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
           />
         </div>
 
