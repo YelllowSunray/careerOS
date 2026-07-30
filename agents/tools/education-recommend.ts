@@ -155,6 +155,8 @@ Use ALL of:
 
 Goal: recommend 3–6 concrete next credentials (certs, short courses, licenses, targeted training — degrees only if truly necessary). Prioritize what unlocks HIREABLE next roles soon, then stretch.
 
+If CAREER INTENT / SEARCH STRATEGY dream roles appear in the candidate block, bias recommendations toward closing gaps for those dream titles (e.g. planning craft for Logistiek Planner) while still keeping near-term attainable steps.
+
 RULES (AI judgment — no keyword blacklists):
 - Prefer credentials that close gaps appearing in MULTIPLE matched jobs or in ladder gapsToClose
 - Prefer short, attainable steps over multi-year degrees unless the ladder clearly requires them

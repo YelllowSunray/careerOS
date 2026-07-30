@@ -357,6 +357,35 @@ export default function ProfilePage() {
     );
   }
 
+  if (profile && !profile.careerIntent) {
+    return (
+      <div className="mx-auto max-w-lg py-20 text-center">
+        <h1 className="text-2xl font-semibold">Career conversation</h1>
+        <p className="mt-2 text-zinc-500">
+          Tell Career OS what you want to become — we&apos;ll build Dream, Bridge,
+          and Never search lanes before hunting jobs.
+        </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <Link href="/intake">
+            <Button>Start conversation</Button>
+          </Link>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              await apiFetch("/api/intake/chat", {
+                method: "POST",
+                body: JSON.stringify({ action: "skip" }),
+              });
+              await loadData();
+            }}
+          >
+            Skip for now
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const hasRawResume = (resume?.rawText?.trim().length ?? 0) > 0;
   const summaryStepFailed = workflow?.steps?.some(
     (s) => s.name === "candidate_profile" && s.status === "failed"
@@ -919,6 +948,60 @@ export default function ProfilePage() {
             <p className="mt-4 text-sm text-zinc-500">
               Re-analyze or Find Jobs so AI can suggest certifications that unlock
               your next roles — using your ladder and what employers ask for.
+            </p>
+          )}
+        </Card>
+
+        <Card>
+          <CardTitle>Career intent</CardTitle>
+          {profile.careerIntent ? (
+            <div className="mt-4 space-y-2 text-sm text-zinc-700">
+              <p>
+                <span className="font-medium">North star:</span>{" "}
+                {profile.careerIntent.northStar}
+              </p>
+              <p className="text-zinc-600">{profile.careerIntent.narrative}</p>
+              <p className="text-xs text-zinc-500">
+                {profile.careerIntent.workSetting} · stretch{" "}
+                {profile.careerIntent.stretchTolerance} · source{" "}
+                {profile.careerIntent.source}
+              </p>
+              {profile.searchStrategy && (
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                  <div>
+                    <p className="font-medium text-emerald-800">Dream</p>
+                    <p className="text-zinc-600">
+                      {profile.searchStrategy.dream.join(", ") || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-sky-800">Bridge</p>
+                    <p className="text-zinc-600">
+                      {profile.searchStrategy.bridge.join(", ") || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-rose-800">Never</p>
+                    <p className="text-zinc-600">
+                      {profile.searchStrategy.never.join(", ") || "—"}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <Link
+                href="/intake"
+                className="inline-block text-xs font-medium text-zinc-900 underline"
+              >
+                Continue conversation
+              </Link>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-zinc-500">
+              No intent yet.{" "}
+              <Link href="/intake" className="underline">
+                Start the career conversation
+              </Link>
+              .
             </p>
           )}
         </Card>

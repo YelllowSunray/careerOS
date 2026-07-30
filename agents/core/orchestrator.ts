@@ -314,6 +314,7 @@ export class WorkflowOrchestrator {
       let evaluatedListingKeys = Array.isArray(workflow.config.evaluatedListingKeys)
         ? [...(workflow.config.evaluatedListingKeys as string[])]
         : [];
+      let roundsWithoutSave = Number(workflow.config.roundsWithoutSave ?? 0) || 0;
       // Prefer durable memory (survives pause → new workflow) over empty config.
       if (evaluatedListingKeys.length === 0) {
         const searchState = await getJobSearchState(userId);
@@ -332,12 +333,20 @@ export class WorkflowOrchestrator {
       // Continuous search: keep discovering until pause / fail / complete.
       while (!(await isFindJobsStopped(workflowId))) {
         round++;
-        console.log(`[Find jobs] Starting search round ${round}`);
+        const emptyFunnel = roundsWithoutSave >= 2;
+        console.log(
+          `[Find jobs] Starting search round ${round}` +
+            (emptyFunnel
+              ? ` (empty-funnel recovery, ${roundsWithoutSave} rounds without saves)`
+              : "")
+        );
         workflow.config = {
           ...workflow.config,
           fitScoreThreshold,
           round,
           evaluatedListingKeys,
+          roundsWithoutSave,
+          emptyFunnelActive: emptyFunnel,
           lastRoundDiscovered: -1, // in progress
           searchingRound: round,
         };
@@ -351,6 +360,7 @@ export class WorkflowOrchestrator {
             round,
             skipIdentityKeys: evaluatedListingKeys,
             searchLanguage,
+            emptyFunnel,
           },
           ctx
         );
@@ -378,6 +388,11 @@ export class WorkflowOrchestrator {
         );
 
         const discovered = discovery.data?.length ?? 0;
+        if (discovered > 0) {
+          roundsWithoutSave = 0;
+        } else {
+          roundsWithoutSave += 1;
+        }
         const searchPlanMeta =
           discovery.metadata?.searchPlan &&
           typeof discovery.metadata.searchPlan === "object"
@@ -388,6 +403,8 @@ export class WorkflowOrchestrator {
           fitScoreThreshold,
           round,
           evaluatedListingKeys,
+          roundsWithoutSave,
+          emptyFunnelActive: roundsWithoutSave >= 2,
           lastRoundDiscovered: discovered,
           searchingRound: round,
           ...(searchPlanMeta ? { searchPlan: searchPlanMeta } : {}),

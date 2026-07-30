@@ -20,6 +20,11 @@ import {
   isSkillIneligible,
   unmetHardRequirementLabels,
 } from "@/lib/job-search/hard-requirements";
+import {
+  applyDreamStretchIfNeeded,
+  resolveNeverList,
+  violatesNeverList,
+} from "@/lib/job-search/strategy";
 import { fetchListingContent } from "@/agents/tools/listing-fetch";
 import { checkListingAvailability } from "@/agents/tools/listing-open";
 import { searchJobBoardsHttp } from "@/agents/tools/job-discovery-linkedin-guest";
@@ -56,11 +61,14 @@ export interface JobDiscoveryInput {
   skipIdentityKeys?: string[];
   /** Override profile setting for this run. */
   searchLanguage?: JobSearchLanguageSetting;
+  /** After 2 empty rounds — force 1 dream + 3 bridge queries. */
+  emptyFunnel?: boolean;
 }
 
 const DEFAULT_BOARDS: JobBoard[] = ["linkedin", "indeed"];
 const MAX_LISTINGS_TO_EVALUATE = 20;
-const MIN_FIT_TO_SAVE = 50;
+/** Allow dream-stretch saves (~48–55). */
+const MIN_FIT_TO_SAVE = 45;
 /** Parallel detail-fetch + match workers (each still one Gemini match call). */
 const EVALUATE_CONCURRENCY = 3;
 
@@ -269,6 +277,20 @@ async function listingsToMatchedJobs(
           return { kind: "rejected" as const, identityKey };
         }
 
+        const neverList = resolveNeverList(context.profile);
+        if (violatesNeverList(listing.title, neverList)) {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (never): ${listing.title} @ ${listing.company}`
+          );
+          return { kind: "rejected" as const, identityKey };
+        }
+
+        matchResult = applyDreamStretchIfNeeded(
+          matchResult,
+          listing.title,
+          context.profile
+        );
+
         if (matchResult.languageRequirementMet === false) {
           console.log(
             `[Job discovery] [${platform}] Rejected (language): ${listing.title} @ ${listing.company} · requires [${(matchResult.requiredLanguages ?? []).join(", ") || "?"}] — ${matchResult.languageNotes || "candidate missing required language"}`
@@ -463,7 +485,13 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
           input.searchLanguage ??
           settings.jobSearchLanguage ??
           "auto",
+        emptyFunnel: input.emptyFunnel === true,
       });
+      if (input.emptyFunnel) {
+        console.log(
+          "[Job discovery] Empty-funnel mode: preferring 1 dream + bridge lanes"
+        );
+      }
       const searchTerms = searchPlan.queries;
       const queryPlans = searchPlan.queryPlans;
       if (workflowId && (await isFindJobsStopped(workflowId))) {

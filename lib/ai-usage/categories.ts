@@ -22,6 +22,7 @@ const JOB_SEARCH_OPS = new Set([
   "job_feedback_resynth",
   "job_feedback_apply",
   "listing_open_check",
+  "jobs_coach",
 ]);
 
 const APPLICATION_OPS = new Set([
@@ -41,6 +42,7 @@ const PROFILE_OPS = new Set([
   "document_extraction",
   "linkedin_profile_extract",
   "suggest_target_roles",
+  "career_intake",
 ]);
 
 export function categorizeAiOperation(operation: string): AiUsageCategory {

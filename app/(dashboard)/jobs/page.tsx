@@ -15,6 +15,8 @@ import type {
   Workflow,
   Application,
   CoverLetterLanguage,
+  SearchStrategy,
+  CareerIntent,
 } from "@/lib/types";
 import type { JobSearchLanguageSetting } from "@/lib/job-search/locale";
 import {
@@ -166,6 +168,16 @@ export default function JobsPage() {
   const [clearingFeedback, setClearingFeedback] = useState(false);
   const [searchLanguage, setSearchLanguage] =
     useState<JobSearchLanguageSetting>("auto");
+  const [coach, setCoach] = useState<{
+    active: boolean;
+    diagnosis?: string;
+    clarifyingQuestion?: string;
+    proposedStrategy?: SearchStrategy;
+    intentPatch?: Partial<CareerIntent>;
+    roundsWithoutSave?: number;
+  } | null>(null);
+  const [coachLoading, setCoachLoading] = useState(false);
+  const [coachConfirming, setCoachConfirming] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -202,6 +214,10 @@ export default function JobsPage() {
           commuteMode: profile.commuteMode,
           commuteMaxMinutes: profile.commuteMaxMinutes,
         });
+        // Dream-target stretch saves should be visible when stretch mode is on (default).
+        if (profile.settings?.showStretchTargets !== false) {
+          setShowStretch(true);
+        }
       }
       if (profile?.settings?.jobSearchLanguage) {
         setSearchLanguage(profile.settings.jobSearchLanguage);
@@ -220,6 +236,43 @@ export default function JobsPage() {
       setLoading(false);
     }
   }, [apiFetch]);
+
+  useEffect(() => {
+    const empty = Boolean(workflow?.config?.emptyFunnelActive);
+    const rounds = Number(workflow?.config?.roundsWithoutSave ?? 0);
+    if (!empty && rounds < 2) {
+      setCoach(null);
+      return;
+    }
+    let cancelled = false;
+    setCoachLoading(true);
+    apiFetch("/api/jobs/coach")
+      .then((data) => {
+        if (!cancelled) setCoach(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCoach({
+            active: true,
+            diagnosis:
+              "Search is empty. Planner-level roles may be rejecting for craft gaps — consider confirming bridge office roles.",
+            clarifyingQuestion:
+              "Should we prioritize office bridge roles while keeping your dream title as one query?",
+            roundsWithoutSave: rounds,
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCoachLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    apiFetch,
+    workflow?.config?.emptyFunnelActive,
+    workflow?.config?.roundsWithoutSave,
+  ]);
 
   useEffect(() => {
     load();
@@ -668,6 +721,71 @@ export default function JobsPage() {
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Job search was paused. Saved matches stay; previously rejected listings
           stay skipped when you Find Jobs again. Clear Results to re-open those.
+        </div>
+      )}
+
+      {(Boolean(workflow?.config?.emptyFunnelActive) || coach?.active) && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          <p className="font-medium">Empty-funnel coach</p>
+          <p className="mt-1 text-sky-800">
+            {coachLoading
+              ? "Diagnosing why nothing saved…"
+              : coach?.diagnosis ||
+                "No new saves for a few rounds — switching toward bridge office roles while keeping your dream title."}
+          </p>
+          {coach?.clarifyingQuestion && (
+            <p className="mt-2 text-xs text-sky-700">
+              {coach.clarifyingQuestion}
+            </p>
+          )}
+          {coach?.proposedStrategy && (
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+              <div>
+                <p className="font-medium">Dream</p>
+                <p>{coach.proposedStrategy.dream.join(", ") || "—"}</p>
+              </div>
+              <div>
+                <p className="font-medium">Bridge</p>
+                <p>{coach.proposedStrategy.bridge.join(", ") || "—"}</p>
+              </div>
+              <div>
+                <p className="font-medium">Never</p>
+                <p>{coach.proposedStrategy.never.join(", ") || "—"}</p>
+              </div>
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {coach?.proposedStrategy && (
+              <Button
+                disabled={coachConfirming}
+                onClick={async () => {
+                  setCoachConfirming(true);
+                  try {
+                    await apiFetch("/api/jobs/coach", {
+                      method: "POST",
+                      body: JSON.stringify({
+                        action: "confirm",
+                        searchStrategy: coach.proposedStrategy,
+                        intentPatch: coach.intentPatch,
+                      }),
+                    });
+                    setCoach(null);
+                    await load();
+                  } finally {
+                    setCoachConfirming(false);
+                  }
+                }}
+              >
+                {coachConfirming ? "Saving…" : "Confirm new strategy"}
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => setCoach(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
         </div>
       )}
 

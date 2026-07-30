@@ -67,6 +67,11 @@ export interface UserSettings {
   jobBoards?: JobBoard[];
   /** Auto-detect or force language for job-board keyword searches. */
   jobSearchLanguage?: JobSearchLanguageSetting;
+  /**
+   * When true (default), enabled dream/target titles that fail hard craft
+   * eligibility are saved as stretch matches with gap chips instead of hidden.
+   */
+  showStretchTargets?: boolean;
   /** Playwright browse URLs — use {query} as search placeholder */
   playwrightJobSearchUrls?: string[];
   /** Company career page URLs to crawl */
@@ -105,6 +110,10 @@ export interface UserProfile {
    * Enabled titles hard-drive discovery queries (3 of 4).
    */
   targetRoles?: TargetRolesPreference;
+  /** Conversational north-star / aspirations (survives re-analyze). */
+  careerIntent?: CareerIntent;
+  /** Confirmed dream / bridge / never search lanes. */
+  searchStrategy?: SearchStrategy;
   /** Languages the candidate speaks (e.g. English, Dutch). Used as a hard job-eligibility filter. */
   languagesSpoken?: string[];
   /** Home base for commute screening (city or address, e.g. "Baarn, Netherlands"). */
@@ -192,6 +201,40 @@ export interface TargetRolesPreference {
   suggested: TargetRoleSuggestion[];
   enabled: string[];
   suggestedAt?: string;
+}
+
+export type WorkSettingPreference = "office" | "hybrid" | "floor" | "flexible";
+
+export type StretchTolerance =
+  | "hireable_only"
+  | "show_stretch"
+  | "dream_aggressive";
+
+/** Conversational model of who the candidate wants to become. */
+export interface CareerIntent {
+  northStar: string;
+  narrative: string;
+  antiGoals: string[];
+  workSetting: WorkSettingPreference;
+  horizon: {
+    now: string[];
+    sixMonths: string[];
+    twoYears: string[];
+  };
+  stretchTolerance: StretchTolerance;
+  moneyFloor?: string;
+  nonNegotiables: string[];
+  openQuestions: string[];
+  updatedAt: string;
+  source: "intake" | "coach" | "manual" | "skip";
+}
+
+/** Confirmed search lanes for discovery. */
+export interface SearchStrategy {
+  dream: string[];
+  bridge: string[];
+  never: string[];
+  confirmedAt: string;
 }
 
 /** Near-term next role (~0–18 months) or stretch (~1–2 years). */

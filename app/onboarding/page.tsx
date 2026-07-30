@@ -109,7 +109,7 @@ export default function OnboardingPage() {
       }
 
       await apiFetch("/api/profile/process", { method: "POST", body: JSON.stringify({}) });
-      router.push("/profile");
+      router.push("/intake");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Onboarding failed";
       setError(message);

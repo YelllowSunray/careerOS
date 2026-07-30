@@ -13,6 +13,7 @@ import {
   normalizeWorkPreferences,
 } from "@/lib/job-search/work-preference";
 import { formatTargetRolesForPrompt } from "@/lib/job-search/target-roles";
+import { formatCareerIntentForPrompt } from "@/lib/job-search/career-intent";
 import { formatFeedbackPreferencesForPrompt } from "@/agents/tools/job-feedback";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { ResumeData, PortfolioSite } from "@/lib/types";
@@ -143,6 +144,7 @@ export function formatContextForPrompt(ctx: CandidateContext, maxChars = 20000):
     ctx.profile.jobPreferences?.trim()
       ? `Job preferences: ${ctx.profile.jobPreferences.trim()}`
       : "",
+    formatCareerIntentForPrompt(ctx.profile),
     formatTargetRolesForPrompt(ctx.profile),
     formatCommuteForPrompt(ctx.profile),
     formatFeedbackPreferencesForPrompt(ctx.feedbackPreferences),

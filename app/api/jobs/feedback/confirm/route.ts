@@ -47,6 +47,57 @@ export async function POST(request: NextRequest) {
       mode,
     });
 
+    // Deepen CareerIntent from confirmed learn feedback.
+    if (mode === "learn" && body.review) {
+      try {
+        const { getProfile, saveProfile } = await import("@/services/firestore");
+        const { nowIso } = await import("@/lib/utils/dates");
+        const profile = await getProfile(userId);
+        if (profile) {
+          const theme = body.review.theme;
+          const anti: string[] = [];
+          if (theme === "wrong_craft" || theme === "too_senior") {
+            anti.push(body.review.constraintSummary || reason.slice(0, 160));
+          }
+          if (theme === "location_commute") {
+            anti.push(body.review.constraintSummary || "Avoid roles outside preferred location/commute");
+          }
+          const prev = profile.careerIntent;
+          const careerIntent = {
+            northStar: prev?.northStar || profile.targetRoles?.primary || "Next role",
+            narrative: prev?.narrative || profile.jobPreferences || "",
+            antiGoals: [
+              ...new Set([...(prev?.antiGoals ?? []), ...anti]),
+            ].slice(0, 12),
+            workSetting: prev?.workSetting ?? ("flexible" as const),
+            horizon: prev?.horizon ?? { now: [], sixMonths: [], twoYears: [] },
+            stretchTolerance: prev?.stretchTolerance ?? ("show_stretch" as const),
+            moneyFloor: prev?.moneyFloor,
+            nonNegotiables: [
+              ...new Set([
+                ...(prev?.nonNegotiables ?? []),
+                body.review.constraintSummary,
+              ]),
+            ].slice(0, 12),
+            openQuestions: prev?.openQuestions ?? [],
+            updatedAt: nowIso(),
+            source: (prev?.source === "intake" ? "intake" : "manual") as
+              | "intake"
+              | "coach"
+              | "manual"
+              | "skip",
+          };
+          await saveProfile({
+            ...profile,
+            careerIntent,
+            updatedAt: nowIso(),
+          });
+        }
+      } catch (intentErr) {
+        console.warn("[Feedback confirm] Intent update skipped:", intentErr);
+      }
+    }
+
     return jsonOk(result);
   } catch (e) {
     if (e instanceof AuthError) return jsonError(e.message, 401);

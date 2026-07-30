@@ -8,6 +8,10 @@ import {
   parseWorkPreferencesBody,
 } from "@/lib/job-search/work-preference";
 import { parseTargetRolesBody } from "@/lib/job-search/target-roles";
+import {
+  parseCareerIntentBody,
+  parseSearchStrategyBody,
+} from "@/lib/job-search/career-intent";
 
 const COMMUTE_MODES = new Set(["car", "bike", "public_transit", "walk"]);
 
@@ -85,6 +89,14 @@ export async function PUT(request: NextRequest) {
         body.targetRoles !== undefined
           ? parseTargetRolesBody(body.targetRoles)
           : existing?.targetRoles,
+      careerIntent:
+        body.careerIntent !== undefined
+          ? parseCareerIntentBody(body.careerIntent)
+          : existing?.careerIntent,
+      searchStrategy:
+        body.searchStrategy !== undefined
+          ? parseSearchStrategyBody(body.searchStrategy)
+          : existing?.searchStrategy,
       languagesSpoken: Array.isArray(body.languagesSpoken)
         ? [
             ...new Set(

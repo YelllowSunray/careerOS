@@ -374,6 +374,7 @@ REQUIREMENTS:
 1. coverLetter: A complete, personalized cover letter (3-4 paragraphs) for "${job.title}" at ${job.company}.
    - Open by naming the exact role title and company
    - Walk through the job listing's key requirements and map each to concrete resume/portfolio evidence
+   - If CAREER INTENT narrative is present, weave a brief honest bridge story (e.g. ops experience → office planning aspiration) without inventing credentials
    - If the job needs a skill (e.g. Django) and the candidate has it, say so with a specific example — do not write a generic bio
    - Professional first-person tone — NOT a generic template
    - If COVER LETTER SAMPLES are provided, match voice/structure only — write a NEW letter for this job

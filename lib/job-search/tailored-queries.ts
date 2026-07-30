@@ -21,6 +21,11 @@ import {
   type SearchQueryPlan,
 } from "@/lib/job-search/locale";
 import { getEnabledTargetSearchQueries } from "@/lib/job-search/target-roles";
+import {
+  getLaneQueries,
+  laneQueriesToPlans,
+  shouldUseStrategyLanes,
+} from "@/lib/job-search/strategy";
 
 export type { SearchQueryPlan, SearchLanguageStrategy };
 
@@ -239,12 +244,39 @@ function finalizeSearchPlan(
 /** AI infers seniority, search language strategy, and board-ready queries. */
 export async function generateTailoredSearchPlan(
   context: CandidateContext,
-  options?: { searchLanguage?: JobSearchLanguageSetting }
+  options?: {
+    searchLanguage?: JobSearchLanguageSetting;
+    emptyFunnel?: boolean;
+  }
 ): Promise<TailoredSearchPlan> {
   const userSetting =
     options?.searchLanguage ??
     context.profile.settings.jobSearchLanguage ??
     "auto";
+  const emptyFunnel = options?.emptyFunnel === true;
+  const heuristicLevel = inferExperienceLevelFromContext(context);
+  const fallbackLang = resolveJobSearchLanguage(context, userSetting);
+
+  // Strategy / target / intent lanes — deterministic when available.
+  if (shouldUseStrategyLanes(context.profile) || emptyFunnel) {
+    const laneQueries = getLaneQueries(context.profile, {
+      emptyFunnel,
+      language: fallbackLang,
+    });
+    if (laneQueries.length >= 2) {
+      const plans = laneQueriesToPlans(laneQueries, fallbackLang);
+      return finalizeSearchPlan(
+        plans,
+        heuristicLevel,
+        emptyFunnel
+          ? `Empty-funnel recovery: 1 dream + bridge lanes (${laneQueries.join(", ")})`
+          : `Strategy/target lanes: ${laneQueries.join(", ")}`,
+        `Lane language bias: ${fallbackLang}`,
+        userSetting
+      );
+    }
+  }
+
   const isLocked = userSetting === "nl" || userSetting === "en";
   const languageBlock = isLocked
     ? searchLanguageLockedBlock(userSetting)
@@ -256,7 +288,6 @@ export async function generateTailoredSearchPlan(
   );
   const ladderQueries = getLadderSearchQueriesFromContext(context, 6);
   const ladderBlock = formatCareerLadderForPrompt(context);
-  const heuristicLevel = inferExperienceLevelFromContext(context);
   const jobPrefs = context.profile.jobPreferences?.trim();
   const targetQueries = getEnabledTargetSearchQueries(context.profile);
   const hasTargetRoles = targetQueries.length > 0;
@@ -367,7 +398,6 @@ ${candidateBlock}`,
     console.warn("[Job search] Tailored query generation failed:", e);
   }
 
-  const fallbackLang = resolveJobSearchLanguage(context, userSetting);
   const level = heuristicLevel;
   let fallbackPlans = buildFallbackQueryPlans(context, level, fallbackLang);
   if (hasTargetRoles) {
