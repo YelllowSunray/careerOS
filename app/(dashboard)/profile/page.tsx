@@ -6,6 +6,7 @@ import { useApi } from "@/lib/hooks/use-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { ProfileDetailsCard } from "@/components/profile/profile-details-card";
+import { TargetRolesSection } from "@/components/profile/target-roles-section";
 import type { UserProfile, CandidateProfile, ResumeData, Workflow, FeedbackPreferenceState } from "@/lib/types";
 import type { AiUsageRecord } from "@/lib/types/ai-usage";
 import {
@@ -941,6 +942,14 @@ export default function ProfilePage() {
             <p className="mt-4 text-sm text-zinc-500">
               No roles yet. Click Re-analyze to run AI extraction.
             </p>
+          )}
+          {profile && (
+            <TargetRolesSection
+              profile={profile}
+              candidate={candidate}
+              onSave={handleSaveProfile}
+              apiFetch={apiFetch}
+            />
           )}
         </Card>
 

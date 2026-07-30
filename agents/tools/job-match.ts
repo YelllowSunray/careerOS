@@ -8,6 +8,7 @@ import {
 import { getPrimaryCountry } from "@/lib/job-search/countries";
 import { formatCommuteForPrompt } from "@/lib/commute/helpers";
 import { screenCommute } from "@/lib/commute/screening";
+import { formatTargetRolesForPrompt } from "@/lib/job-search/target-roles";
 import {
   formatWorkPreferences,
   normalizeWorkPreferences,
@@ -118,6 +119,16 @@ Work preference: ${workPref}
 Preferred locations: ${countries}
 Set preferencesMatch=true and preferenceAlignment="No specific job preferences stated."`;
 
+  const targetRolesBlock = formatTargetRolesForPrompt(context.profile);
+  const targetRolesScoring = targetRolesBlock
+    ? `
+${targetRolesBlock}
+
+TARGET ROLE SCORING (soft — not a hard veto):
+- Prefer jobs whose title/family aligns with enabled target roles.
+- Still apply coreCraftFit / skillRequirementMet honestly; do not invent eligibility.`
+    : "";
+
   const ladderScoringBlock = ladderBlock
     ? `
 ${ladderBlock}
@@ -179,6 +190,8 @@ TARGET SENIORITY BASELINE: ${seniorityLabel(targetLevel)} (stretch up is encoura
 
 ${preferenceBlock}
 
+${targetRolesScoring}
+
 ${languageBlock}
 
 ${commuteBlock}
@@ -187,7 +200,7 @@ ${ladderScoringBlock}
 
 preferencesMatch: soft true/false vs stated prefs (informational only — never veto an ideal ladder move).
 languageRequirementMet: HARD gate — false means this job must not be shown to the candidate.
-commuteRequirementMet: HARD gate when max commute minutes is set — false means commute is too far for the candidate's mode/limit. True when remote or within limit.
+commuteRequirementMet: HARD gate when max commute minutes is set (including home-base only = 0). Home-base only → true only if job is in home-base city; false for other cities and remote. Max > 0 → false when commute exceeds limit; true when remote or within limit.
 feedbackRequirementMet: HARD gate when USER-TAUGHT SEARCH CONSTRAINTS appear in the candidate block — false when this job clearly violates those learned lessons (e.g. user said roles like this are too senior). When uncertain, true. When no taught constraints, true.
 
 CORE CRAFT FIT — PRIMARY ELIGIBILITY (AI judgment, not keyword matching):

@@ -40,6 +40,7 @@ const PROFILE_OPS = new Set([
   "portfolio_extraction",
   "document_extraction",
   "linkedin_profile_extract",
+  "suggest_target_roles",
 ]);
 
 export function categorizeAiOperation(operation: string): AiUsageCategory {

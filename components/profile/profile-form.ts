@@ -22,6 +22,8 @@ export interface ProfileFormValues {
   commuteMode: CommuteMode | "";
   commuteMaxMinutes: string;
   commuteNoLimit: boolean;
+  /** Only show jobs in the home-base city (stores commuteMaxMinutes = 0). */
+  commuteHomeBaseOnly: boolean;
 }
 
 export function parseLanguagesSpoken(raw: string): string[] {
@@ -56,6 +58,7 @@ export function profileToFormValues(
     commuteMode: profile.commuteMode ?? "",
     commuteMaxMinutes: commuteForm.minutes,
     commuteNoLimit: commuteForm.noLimit,
+    commuteHomeBaseOnly: commuteForm.homeBaseOnly,
   };
 }
 
@@ -68,10 +71,11 @@ export function formValuesToProfileUpdate(
   const commuteMode = values.commuteMode || undefined;
   const parsedMax = parseCommuteMaxMinutesFromForm(
     values.commuteMaxMinutes,
-    values.commuteNoLimit
+    values.commuteNoLimit,
+    values.commuteHomeBaseOnly
   );
   const commuteMaxMinutes =
-    homeLocation && commuteMode
+    homeLocation && (values.commuteHomeBaseOnly || commuteMode)
       ? parsedMax === undefined
         ? existing.commuteMaxMinutes
         : parsedMax

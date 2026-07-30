@@ -7,6 +7,7 @@ import {
   normalizeWorkPreferences,
   parseWorkPreferencesBody,
 } from "@/lib/job-search/work-preference";
+import { parseTargetRolesBody } from "@/lib/job-search/target-roles";
 
 const COMMUTE_MODES = new Set(["car", "bike", "public_transit", "walk"]);
 
@@ -80,6 +81,10 @@ export async function PUT(request: NextRequest) {
         body.jobPreferences !== undefined
           ? String(body.jobPreferences).trim() || undefined
           : existing?.jobPreferences,
+      targetRoles:
+        body.targetRoles !== undefined
+          ? parseTargetRolesBody(body.targetRoles)
+          : existing?.targetRoles,
       languagesSpoken: Array.isArray(body.languagesSpoken)
         ? [
             ...new Set(
@@ -102,7 +107,7 @@ export async function PUT(request: NextRequest) {
           ? body.commuteMaxMinutes === null
             ? null
             : Number.isFinite(Number(body.commuteMaxMinutes)) &&
-                Number(body.commuteMaxMinutes) > 0
+                Number(body.commuteMaxMinutes) >= 0
               ? Math.round(Number(body.commuteMaxMinutes))
               : undefined
           : existing?.commuteMaxMinutes,

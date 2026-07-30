@@ -41,6 +41,7 @@ export default function OnboardingPage() {
   const [commuteMode, setCommuteMode] = useState("");
   const [commuteMaxMinutes, setCommuteMaxMinutes] = useState("");
   const [commuteNoLimit, setCommuteNoLimit] = useState(false);
+  const [commuteHomeBaseOnly, setCommuteHomeBaseOnly] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeError, setResumeError] = useState("");
 
@@ -65,13 +66,14 @@ export default function OnboardingPage() {
     try {
       const parsedCommuteMax = parseCommuteMaxMinutesFromForm(
         commuteMaxMinutes,
-        commuteNoLimit
+        commuteNoLimit,
+        commuteHomeBaseOnly
       );
       const commutePayload =
-        homeLocation.trim() && commuteMode
+        homeLocation.trim() && (commuteHomeBaseOnly || commuteMode)
           ? {
               homeLocation: homeLocation.trim(),
-              commuteMode,
+              ...(commuteMode ? { commuteMode } : {}),
               commuteMaxMinutes: parsedCommuteMax ?? null,
             }
           : {};
@@ -226,6 +228,26 @@ export default function OnboardingPage() {
                 onChange={(e) => setHomeLocation(e.target.value)}
                 placeholder="Baarn, Netherlands"
               />
+              <label className="mt-2 flex items-start gap-2 text-sm text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={commuteHomeBaseOnly}
+                  onChange={(e) => {
+                    setCommuteHomeBaseOnly(e.target.checked);
+                    if (e.target.checked) {
+                      setCommuteNoLimit(false);
+                      setCommuteMaxMinutes("");
+                    }
+                  }}
+                  className="mt-0.5 rounded border-zinc-300"
+                />
+                <span>
+                  <span className="font-medium">Home base only</span>
+                  <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                    Only show jobs in your home-base city (not other cities or remote elsewhere).
+                  </span>
+                </span>
+              </label>
             </div>
             <div>
               <Label htmlFor="commute-mode">Commute mode</Label>
@@ -233,7 +255,8 @@ export default function OnboardingPage() {
                 id="commute-mode"
                 value={commuteMode}
                 onChange={(e) => setCommuteMode(e.target.value)}
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                disabled={commuteHomeBaseOnly}
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm disabled:bg-zinc-50 disabled:text-zinc-400"
               >
                 <option value="">Not set</option>
                 <option value="car">Car</option>
@@ -252,22 +275,31 @@ export default function OnboardingPage() {
                   value={commuteMaxMinutes}
                   onChange={(e) => setCommuteMaxMinutes(e.target.value)}
                   placeholder="30"
-                  disabled={commuteNoLimit}
+                  disabled={commuteNoLimit || commuteHomeBaseOnly}
                   className="sm:max-w-[8rem]"
                 />
                 <label className="flex items-center gap-2 text-sm text-zinc-600">
                   <input
                     type="checkbox"
                     checked={commuteNoLimit}
+                    disabled={commuteHomeBaseOnly}
                     onChange={(e) => {
                       setCommuteNoLimit(e.target.checked);
-                      if (e.target.checked) setCommuteMaxMinutes("");
+                      if (e.target.checked) {
+                        setCommuteMaxMinutes("");
+                        setCommuteHomeBaseOnly(false);
+                      }
                     }}
                     className="rounded border-zinc-300"
                   />
                   No limit
                 </label>
               </div>
+              {commuteHomeBaseOnly && (
+                <p className="mt-1 text-xs text-zinc-500">
+                  Home base only is on — commute minutes are not used.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="job-prefs">What type of job do you want?</Label>

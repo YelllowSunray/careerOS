@@ -1,4 +1,7 @@
-import { hasCommuteLimit } from "@/lib/commute/helpers";
+import {
+  hasCommuteLimit,
+  isJobInHomebase,
+} from "@/lib/commute/helpers";
 import { estimateCommuteMinutes, isLikelyRemoteJob } from "@/lib/commute/estimate";
 import type { UserProfile } from "@/lib/types";
 
@@ -37,6 +40,22 @@ export async function screenCommute(
       commuteRequirementMet: true,
       commuteNotes: input.aiCommuteNotes?.trim() || "Commute preference not configured.",
       estimatedCommuteMinutes: input.aiEstimatedCommuteMinutes,
+    };
+  }
+
+  // Home-base only → job must be in home-base city (not remote elsewhere, not other cities).
+  if (max === 0 && home) {
+    if (isJobInHomebase(home, jobLocation)) {
+      return {
+        commuteRequirementMet: true,
+        estimatedCommuteMinutes: 0,
+        commuteNotes: `Job is in your home base (${home}) — home-base-only filter.`,
+      };
+    }
+    return {
+      commuteRequirementMet: false,
+      estimatedCommuteMinutes: input.aiEstimatedCommuteMinutes,
+      commuteNotes: `Home-base only: only roles in ${home}. Job location "${jobLocation?.trim() || "unknown"}" does not match.`,
     };
   }
 

@@ -236,6 +236,33 @@ export function ProfileDetailsCard({
             placeholder="Baarn, Netherlands"
             className="mt-1"
           />
+          <label className="mt-2 flex items-start gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              checked={form.commuteHomeBaseOnly}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  commuteHomeBaseOnly: e.target.checked,
+                  commuteNoLimit: e.target.checked ? false : prev.commuteNoLimit,
+                  commuteMaxMinutes: e.target.checked
+                    ? ""
+                    : prev.commuteMaxMinutes,
+                }))
+              }
+              className="mt-0.5 rounded border-zinc-300"
+            />
+            <span>
+              <span className="font-medium">Home base only</span>
+              <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                Only show jobs located in your home-base city
+                {form.homeLocation.trim()
+                  ? ` (${form.homeLocation.trim().split(",")[0]?.trim()})`
+                  : ""}
+                . Other cities and remote elsewhere are hidden.
+              </span>
+            </span>
+          </label>
         </div>
         <div>
           <Label htmlFor="edit-commute-mode">Commute mode</Label>
@@ -243,7 +270,8 @@ export function ProfileDetailsCard({
             id="edit-commute-mode"
             value={form.commuteMode}
             onChange={(e) => update("commuteMode", e.target.value)}
-            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
+            disabled={form.commuteHomeBaseOnly}
+            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base disabled:bg-zinc-50 disabled:text-zinc-400 sm:py-2 sm:text-sm"
           >
             <option value="">Not set</option>
             <option value="car">Car</option>
@@ -262,17 +290,21 @@ export function ProfileDetailsCard({
               value={form.commuteMaxMinutes}
               onChange={(e) => update("commuteMaxMinutes", e.target.value)}
               placeholder="30"
-              disabled={form.commuteNoLimit}
+              disabled={form.commuteNoLimit || form.commuteHomeBaseOnly}
               className="sm:max-w-[8rem]"
             />
             <label className="flex items-center gap-2 text-sm text-zinc-600">
               <input
                 type="checkbox"
                 checked={form.commuteNoLimit}
+                disabled={form.commuteHomeBaseOnly}
                 onChange={(e) =>
                   setForm((prev) => ({
                     ...prev,
                     commuteNoLimit: e.target.checked,
+                    commuteHomeBaseOnly: e.target.checked
+                      ? false
+                      : prev.commuteHomeBaseOnly,
                     commuteMaxMinutes: e.target.checked
                       ? ""
                       : prev.commuteMaxMinutes,
@@ -284,8 +316,9 @@ export function ProfileDetailsCard({
             </label>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            Jobs requiring regular on-site attendance beyond this commute will be
-            hidden. Set home + mode + minutes, or choose no limit.
+            {form.commuteHomeBaseOnly
+              ? "Home base only is on — commute minutes are not used."
+              : "Jobs beyond this one-way commute are hidden. Set home + mode + minutes, or choose no limit."}
           </p>
         </div>
         <div className="sm:col-span-2">

@@ -100,13 +100,18 @@ export interface UserProfile {
   workPreference?: WorkPreference;
   /** Free-text: employment type, schedule, location, industry, seniority, etc. */
   jobPreferences?: string;
+  /**
+   * Roles the candidate wants to search for (primary + related suggestions).
+   * Enabled titles hard-drive discovery queries (3 of 4).
+   */
+  targetRoles?: TargetRolesPreference;
   /** Languages the candidate speaks (e.g. English, Dutch). Used as a hard job-eligibility filter. */
   languagesSpoken?: string[];
   /** Home base for commute screening (city or address, e.g. "Baarn, Netherlands"). */
   homeLocation?: string;
   /** Preferred commute mode when evaluating on-site/hybrid roles. */
   commuteMode?: CommuteMode;
-  /** Max one-way commute minutes; null = no limit; undefined = not configured. */
+  /** Max one-way commute minutes; 0 = home-base city only (UI: "Home base only"); null = no limit; undefined = not configured. */
   commuteMaxMinutes?: number | null;
   resume?: {
     storagePath: string;
@@ -166,6 +171,27 @@ export interface InferredRole {
   role: string;
   confidence: number;
   approved: boolean;
+}
+
+/** AI-suggested role related to the candidate's primary target. */
+export interface TargetRoleSuggestion {
+  role: string;
+  /** LinkedIn/Indeed-style keyword phrase */
+  searchQuery: string;
+  relatedness: "adjacent" | "stretch";
+  /** Set when the CV evidence for this jump looks thin */
+  hireabilityNote?: string;
+}
+
+/**
+ * User-owned target roles for job search (survives re-analyze).
+ * `enabled` = role titles checked for discovery (primary and/or suggestions).
+ */
+export interface TargetRolesPreference {
+  primary: string;
+  suggested: TargetRoleSuggestion[];
+  enabled: string[];
+  suggestedAt?: string;
 }
 
 /** Near-term next role (~0–18 months) or stretch (~1–2 years). */

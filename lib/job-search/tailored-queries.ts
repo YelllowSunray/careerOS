@@ -20,6 +20,7 @@ import {
   type SearchLanguageStrategy,
   type SearchQueryPlan,
 } from "@/lib/job-search/locale";
+import { getEnabledTargetSearchQueries } from "@/lib/job-search/target-roles";
 
 export type { SearchQueryPlan, SearchLanguageStrategy };
 
@@ -257,8 +258,33 @@ export async function generateTailoredSearchPlan(
   const ladderBlock = formatCareerLadderForPrompt(context);
   const heuristicLevel = inferExperienceLevelFromContext(context);
   const jobPrefs = context.profile.jobPreferences?.trim();
+  const targetQueries = getEnabledTargetSearchQueries(context.profile);
+  const hasTargetRoles = targetQueries.length > 0;
 
   try {
+    const targetBlock = hasTargetRoles
+      ? `
+USER-SELECTED TARGET ROLES (HARD — these MUST appear as search queries):
+${targetQueries.map((q, i) => `${i + 1}. ${q}`).join("\n")}
+
+QUERY SLOT RULES WHEN TARGETS ARE SET:
+- Put the ${Math.min(3, targetQueries.length)} enabled target role(s) as intent="next" queries (use the phrases above, lightly normalize casing only).
+- Exactly ONE remaining query may be intent="stretch" (related same-craft scope step OR a close variant not already listed).
+- Do NOT replace target roles with warehouse/floor titles just because the CV looks junior for the target.
+- Hireability warnings are informational; still search the enabled targets.`
+      : `
+HIREABILITY FIRST (judgment — no keyword blacklists):
+- Ask: "Would a realistic employer interview them for this title with THIS CV?" If no → do not search it.
+- Prefer CAREER LADDER nextRoles / their searchQuery phrases when those are hireable from evidence.
+- Prefer SAME-CRAFT scope step-ups (bigger team/site/warehouse/floor leadership) over inventing a new specialty profession.
+- Tools they can learn on the job are fine to search around (supervisor roles that use WMS). Specialty crafts they never practiced are not (planner / S&OP / ERP specialist / demand planning / white-collar coordinator-only titles) unless the CV already shows that craft OR the user enabled that title as a target role.
+- At most ONE query may closely mirror their current job title.
+- At most ONE query may be intent="stretch" (bigger same-craft scope). The other 3 MUST be intent="next" (near-term hireable).
+- NEVER force VP/Director/C-level without leadership evidence.
+- Preferences are soft: at most one query may reflect preferred sector/comp language.
+- Vary queries; do not repeat the same role family four times.
+- Do NOT invent experience; DO invent plausible NEXT role directions supported by skills they already demonstrated.`;
+
     const result = await generateStructured(
       `Design a FULLY AI-powered job board search plan for this candidate's IDEAL NEXT ROLES — roles an employer would hire them for SOON.
 
@@ -272,28 +298,18 @@ STEP 1 — Infer REALISTIC target experience level from evidence of ownership/ye
 
 STEP 2 — Decide search language strategy (single vs mixed) using the framework below.
 
-STEP 3 — Produce exactly 4 LinkedIn/Indeed keyword queries that find HIREABLE-NOW ideal next jobs.
+STEP 3 — Produce exactly 4 LinkedIn/Indeed keyword queries.
 
 ${languageBlock}
 
-HIREABILITY FIRST (judgment — no keyword blacklists):
-- Ask: "Would a realistic employer interview them for this title with THIS CV?" If no → do not search it.
-- Prefer CAREER LADDER nextRoles / their searchQuery phrases when those are hireable from evidence.
-- Prefer SAME-CRAFT scope step-ups (bigger team/site/warehouse/floor leadership) over inventing a new specialty profession.
-- Tools they can learn on the job are fine to search around (supervisor roles that use WMS). Specialty crafts they never practiced are not (planner / S&OP / ERP specialist / demand planning / white-collar coordinator-only titles) unless the CV already shows that craft.
-- At most ONE query may closely mirror their current job title.
-- At most ONE query may be intent="stretch" (bigger same-craft scope). The other 3 MUST be intent="next" (near-term hireable).
-- NEVER force VP/Director/C-level without leadership evidence.
-- Preferences are soft: at most one query may reflect preferred sector/comp language.
-- Vary queries; do not repeat the same role family four times.
-- Do NOT invent experience; DO invent plausible NEXT role directions supported by skills they already demonstrated.
+${targetBlock}
 
 QUERY RULES:
 - 2-5 words each; role-style phrases boards understand
 - Tag each query with intent "next" or "stretch"
 - Language tag per query (nl/en) must match the strategy
 
-Ladder search seeds (use or refine — drop any seed that requires a craft they lack): ${ladderQueries.join(", ") || "none — invent from profile"}
+Ladder search seeds (use or refine — drop any seed that requires a craft they lack, unless it is a user-enabled target): ${ladderQueries.join(", ") || "none — invent from profile"}
 Seed role hints: ${seedRoles.join(", ") || "infer freely from resume"}
 Heuristic level hint: ${heuristicLevel}
 ${jobPrefs ? `Job preferences (soft bias only): ${jobPrefs}` : "No special job preferences."}
@@ -323,16 +339,26 @@ ${candidateBlock}`,
       }
     );
 
-    const queryPlans: SearchQueryPlan[] = result.searchQueries.map((item) => ({
+    let queryPlans: SearchQueryPlan[] = result.searchQueries.map((item) => ({
       query: item.query,
       language: item.language,
     }));
+
+    if (hasTargetRoles) {
+      queryPlans = mergeTargetRoleQueries(
+        targetQueries,
+        queryPlans,
+        resolveJobSearchLanguage(context, userSetting)
+      );
+    }
 
     if (queryPlans.length >= 2) {
       return finalizeSearchPlan(
         queryPlans,
         result.inferredExperienceLevel,
-        result.rationale,
+        hasTargetRoles
+          ? `${result.rationale} | User targets: ${targetQueries.join(", ")}`
+          : result.rationale,
         result.languageRationale,
         userSetting
       );
@@ -343,14 +369,52 @@ ${candidateBlock}`,
 
   const fallbackLang = resolveJobSearchLanguage(context, userSetting);
   const level = heuristicLevel;
-  const fallbackPlans = buildFallbackQueryPlans(context, level, fallbackLang);
+  let fallbackPlans = buildFallbackQueryPlans(context, level, fallbackLang);
+  if (hasTargetRoles) {
+    fallbackPlans = mergeTargetRoleQueries(
+      targetQueries,
+      fallbackPlans,
+      fallbackLang
+    );
+  }
   return finalizeSearchPlan(
     fallbackPlans,
     level,
-    `Fallback ${level}-level queries from profile heuristics`,
+    hasTargetRoles
+      ? `Fallback with user targets: ${targetQueries.join(", ")}`
+      : `Fallback ${level}-level queries from profile heuristics`,
     `Fallback language: ${fallbackLang}`,
     userSetting
   );
+}
+
+/** Force enabled targets into the first slots; keep one AI/stretch slot. */
+function mergeTargetRoleQueries(
+  targetQueries: string[],
+  aiPlans: SearchQueryPlan[],
+  defaultLang: ResolvedJobSearchLanguage
+): SearchQueryPlan[] {
+  const targets = targetQueries.slice(0, 3).map((query) => ({
+    query,
+    language:
+      guessQueryLanguage(query) === "nl"
+        ? ("nl" as const)
+        : defaultLang,
+  }));
+
+  const targetKeys = new Set(targets.map((t) => t.query.trim().toLowerCase()));
+  const extras = aiPlans.filter(
+    (p) => !targetKeys.has(p.query.trim().toLowerCase())
+  );
+
+  const merged = [...targets];
+  for (const extra of extras) {
+    if (merged.length >= 4) break;
+    merged.push(extra);
+  }
+
+  // If AI returned nothing useful, pad with targets only.
+  return merged.slice(0, 4);
 }
 
 export function seniorityLabel(level: ExperienceLevel): string {
