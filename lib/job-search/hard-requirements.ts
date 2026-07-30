@@ -93,6 +93,46 @@ export function toMissingSkill(input: {
   };
 }
 
+/** Years / deep specialty gaps that cannot be ramped in ~90 days. */
+export function looksLikeNonLearnableGap(skill: string): boolean {
+  const s = skill.toLowerCase();
+  if (
+    /\b(\d+)\s*[-–to]+\s*(\d+)\+?\s*(years?|yrs?|jaar)\b/.test(s) ||
+    /\b(\d+)\+?\s*(years?|yrs?|jaar)\b/.test(s)
+  ) {
+    return true;
+  }
+  if (
+    /\b(license|licence|certification|certified|degree|diploma|credential|rijbewijs|registratie)\b/.test(
+      s
+    ) &&
+    !/\b(nice|plus|preferred|voordeel)\b/.test(s)
+  ) {
+    return true;
+  }
+  // Named specialty craft that is the job, not a tool tip
+  if (
+    /\b(digital transformation|platform management|demand planning|s&op|sap implementation|wms program|international transport network)\b/.test(
+      s
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Tool / process gaps that are usually learn_on_job on the same craft. */
+export function looksLikeRampableToolGap(skill: string): boolean {
+  const s = skill.toLowerCase();
+  if (looksLikeNonLearnableGap(s)) return false;
+  return (
+    /\b(wms|erp|excel|sap|oracle|salesforce|jira|confluence|powerpoint|tableau|power bi|crm|ats|slack|teams|agile|scrum|kanban)\b/.test(
+      s
+    ) ||
+    /\b(tool|system|software|platform module|reporting)\b/.test(s)
+  );
+}
+
 /** True when the candidate fails at least one must-have / hard gap. */
 export function hasUnmetHardRequirements(
   missingSkills: MissingSkill[] | undefined
@@ -146,6 +186,12 @@ export function isCommuteIneligible(match: {
   commuteRequirementMet?: boolean;
 } | null | undefined): boolean {
   return match?.commuteRequirementMet === false;
+}
+
+export function isFeedbackIneligible(match: {
+  feedbackRequirementMet?: boolean;
+} | null | undefined): boolean {
+  return match?.feedbackRequirementMet === false;
 }
 
 export function groupMissingSkillsByLearnability(

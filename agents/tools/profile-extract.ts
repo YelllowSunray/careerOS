@@ -100,6 +100,7 @@ export async function extractResumeData(
     `You are an expert resume parser. Extract ALL structured data from this resume using only what is present in the text.
 Do not invent information. Extract phone number if present (any format). Separate skills from technologies where possible.
 Return JSON with skills and technologies as arrays of strings.
+certifications must be objects: [{ "name": "string", "issuer": "optional", "year": "optional" }] — never bare strings.
 
 RESUME:
 ${text.slice(0, 28000)}`,

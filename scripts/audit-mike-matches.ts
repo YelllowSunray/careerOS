@@ -21,6 +21,9 @@ async function main() {
     getProfile,
     getCandidateProfile,
   } = await import("../services/firestore");
+  const { normalizeWorkPreferences } = await import(
+    "../lib/job-search/work-preference"
+  );
 
   const auth = getAdminAuth();
   const user = await auth.getUserByEmail("mike@gmail.com");
@@ -44,7 +47,7 @@ async function main() {
         commuteMode: profile?.commuteMode,
         commuteMax: profile?.commuteMaxMinutes,
         prefs: profile?.jobPreferences,
-        workPref: profile?.workPreference,
+        workPref: normalizeWorkPreferences(profile ?? {}),
         country: profile?.preferredCountries,
       },
       null,

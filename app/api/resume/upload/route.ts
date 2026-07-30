@@ -14,6 +14,7 @@ import {
   resumeFileTypeLabel,
 } from "@/lib/resume/files";
 import type { UserProfile } from "@/lib/types";
+import { normalizeWorkPreferences } from "@/lib/job-search/work-preference";
 
 function ensureProfile(userId: string, profile: UserProfile | null): UserProfile {
   return {
@@ -23,7 +24,7 @@ function ensureProfile(userId: string, profile: UserProfile | null): UserProfile
     email: profile?.email ?? "",
     portfolioUrls: profile?.portfolioUrls ?? [],
     preferredCountries: profile?.preferredCountries ?? [],
-    workPreference: profile?.workPreference ?? "any",
+    workPreferences: normalizeWorkPreferences(profile ?? {}),
     onboardingComplete: profile?.onboardingComplete ?? false,
     settings: profile?.settings ?? { fitScoreThreshold: 85, autoApply: false },
     coverLetters: profile?.coverLetters ?? [],

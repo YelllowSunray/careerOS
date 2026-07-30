@@ -108,14 +108,18 @@ export function linkedInRemoteFilter(workPreference: string): string {
 }
 
 /**
- * Prefer structured workPreference; also honor free-text jobPreferences that
- * clearly ask for remote (common when workPreference is still "any").
+ * Prefer structured workPreferences; also honor free-text jobPreferences that
+ * clearly ask for remote-only when structured prefs are open/any.
  */
 export function effectiveRemotePreference(
   workPreference: string,
   jobPreferences?: string | null
 ): string {
   if (workPreference === "remote") return "remote";
+  // Multi-select hint: only force remote board filter when search hint is remote.
+  if (workPreference !== "any" && workPreference !== "remote") {
+    return workPreference;
+  }
   const prefs = jobPreferences?.toLowerCase() ?? "";
   if (
     /\b(fully\s+)?remote\b/.test(prefs) ||

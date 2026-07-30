@@ -12,6 +12,12 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { normalizePreferredCountries } from "@/lib/job-search/countries";
 import { parseLanguagesSpoken } from "@/components/profile/profile-form";
 import { parseCommuteMaxMinutesFromForm } from "@/lib/commute/helpers";
+import type { WorkArrangement } from "@/lib/types";
+import {
+  WORK_ARRANGEMENTS,
+  WORK_ARRANGEMENT_LABELS,
+  toggleWorkArrangement,
+} from "@/lib/job-search/work-preference";
 
 export default function OnboardingPage() {
   const { user } = useAuth();
@@ -28,7 +34,7 @@ export default function OnboardingPage() {
   const [githubUrl, setGithubUrl] = useState("");
   const [portfolioUrls, setPortfolioUrls] = useState("");
   const [preferredCountry, setPreferredCountry] = useState("");
-  const [workPreference, setWorkPreference] = useState("any");
+  const [workPreferences, setWorkPreferences] = useState<WorkArrangement[]>([]);
   const [jobPreferences, setJobPreferences] = useState("");
   const [languagesSpoken, setLanguagesSpoken] = useState("English");
   const [homeLocation, setHomeLocation] = useState("");
@@ -83,7 +89,7 @@ export default function OnboardingPage() {
             .map((u) => u.trim())
             .filter(Boolean),
           preferredCountries: normalizePreferredCountries(preferredCountry),
-          workPreference,
+          workPreferences,
           jobPreferences: jobPreferences.trim() || undefined,
           languagesSpoken: parseLanguagesSpoken(languagesSpoken),
           ...commutePayload,
@@ -174,18 +180,30 @@ export default function OnboardingPage() {
               />
             </div>
             <div>
-              <Label htmlFor="work">Work preference</Label>
-              <select
-                id="work"
-                value={workPreference}
-                onChange={(e) => setWorkPreference(e.target.value)}
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-              >
-                <option value="any">Any</option>
-                <option value="remote">Remote</option>
-                <option value="hybrid">Hybrid</option>
-                <option value="onsite">On-site</option>
-              </select>
+              <Label>Work preference</Label>
+              <div className="mt-2 flex flex-wrap gap-3">
+                {WORK_ARRANGEMENTS.map((arrangement) => (
+                  <label
+                    key={arrangement}
+                    className="inline-flex items-center gap-2 text-sm text-zinc-700"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={workPreferences.includes(arrangement)}
+                      onChange={() =>
+                        setWorkPreferences((prev) =>
+                          toggleWorkArrangement(prev, arrangement)
+                        )
+                      }
+                      className="h-4 w-4 rounded border-zinc-300"
+                    />
+                    {WORK_ARRANGEMENT_LABELS[arrangement]}
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                Select all that apply. Leave all unchecked if you are open to any.
+              </p>
             </div>
             <div>
               <Label htmlFor="languages">Languages spoken</Label>

@@ -8,12 +8,18 @@ import {
 import { getPrimaryCountry } from "@/lib/job-search/countries";
 import { formatCommuteForPrompt } from "@/lib/commute/helpers";
 import { screenCommute } from "@/lib/commute/screening";
+import {
+  formatWorkPreferences,
+  normalizeWorkPreferences,
+} from "@/lib/job-search/work-preference";
 import { inferExperienceLevelFromContext, seniorityLabel } from "@/lib/job-search/tailored-queries";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { Job, JobPathType } from "@/lib/types";
 import {
   hasUnmetHardRequirements,
   isSkillIneligible,
+  looksLikeNonLearnableGap,
+  looksLikeRampableToolGap,
   normalizeCoreCraftFit,
   toMissingSkill,
 } from "@/lib/job-search/hard-requirements";
@@ -55,6 +61,9 @@ const matchSchema = z.object({
   commuteRequirementMet: z.boolean(),
   commuteNotes: z.string(),
   estimatedCommuteMinutes: z.number().optional(),
+  /** false = violates user-taught feedback constraints */
+  feedbackRequirementMet: z.boolean(),
+  feedbackNotes: z.string(),
   pathType: z.enum(["step", "stretch", "destination", "lateral"]),
   ladderPath: z.string(),
   matchedDestination: z.string().optional(),
@@ -69,7 +78,9 @@ function buildHolisticMatchPrompt(
 ): string {
   const candidateBlock = formatContextForPrompt(context, 18000);
   const ladderBlock = formatCareerLadderForPrompt(context);
-  const workPref = context.profile.workPreference;
+  const workPref = formatWorkPreferences(
+    normalizeWorkPreferences(context.profile)
+  );
   const countries = getPrimaryCountry(context.profile.preferredCountries) ?? "any";
   const jobPrefs = context.profile.jobPreferences?.trim();
   const spoken = (context.profile.languagesSpoken ?? []).filter(Boolean);
@@ -177,31 +188,48 @@ ${ladderScoringBlock}
 preferencesMatch: soft true/false vs stated prefs (informational only — never veto an ideal ladder move).
 languageRequirementMet: HARD gate — false means this job must not be shown to the candidate.
 commuteRequirementMet: HARD gate when max commute minutes is set — false means commute is too far for the candidate's mode/limit. True when remote or within limit.
+feedbackRequirementMet: HARD gate when USER-TAUGHT SEARCH CONSTRAINTS appear in the candidate block — false when this job clearly violates those learned lessons (e.g. user said roles like this are too senior). When uncertain, true. When no taught constraints, true.
 
 CORE CRAFT FIT — PRIMARY ELIGIBILITY (AI judgment, not keyword matching):
 
 Decide ONE of:
 - "day_one": Same craft; they can deliver core duties immediately with existing evidence.
 - "with_ramp": Same craft; they can deliver core duties within ~90 days while learning tools/systems/processes on the job. KEEP the job.
-- "not_eligible": Wrong craft, or a true day-1 blocker (specialty they never practiced, essential license/credential/years with no equivalent evidence). HIDE the job.
+- "not_eligible": Wrong craft, or a true day-1 blocker (specialty they never practiced, essential license/credential, OR multi-year specialty experience the posting treats as required with no equivalent evidence). HIDE the job.
+
+HARD vs SOFT vs LEARNABLE (judge each gap — this drives show/hide):
+1) HARD / must_have → coreCraftFit=not_eligible (HIDE):
+   - Posting requires N years in a named specialty that IS the job (e.g. "8–10 years platform management / digital transformation") and the CV shows no comparable specialty years — leadership in a different craft does NOT substitute.
+   - Essential license, degree, registration, or regulated credential missing.
+   - Core deliverables are a specialty the candidate has never practiced (digital platform ownership, S&OP design, ERP implementation lead, etc.).
+2) LEARNABLE / learn_on_job → coreCraftFit=with_ramp (SHOW):
+   - Tools, frameworks, methodologies, agile practices, Lean Portfolio Management, a specific stack — when the underlying craft/leadership already matches.
+   - Mild step-up in team size or stakeholder complexity on the SAME craft.
+3) SOFT / nice_to_have → does not hide:
+   - Explicitly "nice to have", "plus", "preferred", "voordeel", "pre" in the posting.
+   - Adjacent experience that would help but is not required to do the job.
 
 Consistency rules (critical):
 - If you would write that they "possess the core operational/leadership skills" or "could do this job with ramp" → coreCraftFit MUST be day_one or with_ramp — NEVER not_eligible.
 - Missing tools/systems (WMS, Excel, reporting screens, a specific ERP module used as a warehouse tool) while the craft is floor ops / supervision / inventory → almost always with_ramp, NOT not_eligible.
-- Specialty craft that IS the job (S&OP design, demand planning lead, ERP implementation lead, international transport network design) with no CV evidence → not_eligible.
+- Specialty craft that IS the job (platform/digital product leadership, S&OP / demand planning lead, ERP implementation lead, international transport network design) with no CV evidence → not_eligible.
+- "Manager" titles: match the OBJECT of management. Managing NGO projects/volunteers ≠ managing digital platforms/product-tech. Preferential sector fit (charity/NGO) does NOT override a specialty years gap.
 - Posting says "we train" / "nice to have" / junior on a tool → with_ramp or day_one.
 - Mild team-size step-up on the same craft → with_ramp (or day_one), not not_eligible.
 - skillRequirementMet MUST equal (coreCraftFit !== "not_eligible").
+- NEVER put a multi-year specialty requirement the candidate lacks into nice_to_have just to keep a high fitScore — if it is required for the role, it is must_have + not_eligible.
 
 For EVERY material gap, classify learnability (for UI + learningScore):
 - "must_have": Only when coreCraftFit=not_eligible for that gap (true day-1 blocker).
 - "learn_on_job": Expected ramp while doing core work. Use this when coreCraftFit=with_ramp.
-- "nice_to_have": Preference / plus only.
+- "nice_to_have": Preference / plus only — posting marks it soft OR it is truly optional.
 
 Judgment examples (teach the distinction — do not pattern-match keywords):
 - Warehouse Supervisor / Teamleider: core = floor leadership + inventory ops; advanced WMS mentioned → coreCraftFit=with_ramp, WMS=learn_on_job. KEEP.
 - Same title but hire must LEAD a greenfield SAP/WMS program as the main job with no ops leadership overlap → coreCraftFit=not_eligible.
 - Supply chain / S&OP / demand planning where those ARE the job and CV is hands-on warehouse only → not_eligible.
+- Manager Platform / digital transformation requiring 8–10 years platform or digital transformation experience; CV is NGO project leadership without platform/digital craft → not_eligible, years gap=must_have. KEEP ONLY if CV shows comparable platform/digital ownership years.
+- Lean Portfolio Management or agile transition listed alongside a platform role they otherwise qualify for → learn_on_job.
 - Posting says planning/ERP "nice to have" or "we train" → with_ramp or day_one.
 
 missingSkills rules:
@@ -210,6 +238,7 @@ missingSkills rules:
 - If coreCraftFit=not_eligible, ≥1 entry MUST be learnability="must_have".
 - If coreCraftFit=day_one or with_ramp, NO entry may be learnability="must_have" (use learn_on_job / nice_to_have).
 - skillNotes: 1 sentence matching coreCraftFit (never say "can do the job" while setting not_eligible).
+- Do NOT bury required years-in-specialty as nice_to_have.
 
 employerType: short label from the posting.
 
@@ -239,6 +268,8 @@ Return ONLY valid JSON:
   "coreCraftFit": "day_one" | "with_ramp" | "not_eligible",
   "skillRequirementMet": true/false,
   "skillNotes": "1 sentence on skill/credential eligibility",
+  "feedbackRequirementMet": true/false,
+  "feedbackNotes": "1 sentence if taught constraints apply",
   "pathType": "step" | "stretch" | "destination" | "lateral",
   "ladderPath": "This X role → positions you for Y in 1–2 moves",
   "matchedDestination": "ladder title or omit",
@@ -334,22 +365,37 @@ function normalizeMatchResult(
         ? "with_ramp"
         : "day_one");
 
-  if (coreCraftFit === "day_one" || coreCraftFit === "with_ramp") {
-    // Craft transfers — never hide for tool/process gaps the model over-labeled.
+  // Years / specialty / credential gaps cannot be soft-ramped or buried as nice-to-have.
+  const nonLearnableGaps = missingSkills.filter((s) =>
+    looksLikeNonLearnableGap(s.skill)
+  );
+  if (nonLearnableGaps.length > 0) {
     missingSkills = missingSkills.map((s) =>
-      s.learnability === "must_have"
+      looksLikeNonLearnableGap(s.skill)
         ? {
             ...s,
-            learnability: "learn_on_job" as const,
-            isHardRequirement: false,
+            learnability: "must_have" as const,
+            isHardRequirement: true,
           }
         : s
     );
-    if (
-      coreCraftFit === "with_ramp" &&
-      !missingSkills.some((s) => s.learnability === "learn_on_job")
-    ) {
-      // Keep with_ramp semantics even if the model listed no gaps.
+    coreCraftFit = "not_eligible";
+  } else if (coreCraftFit === "day_one" || coreCraftFit === "with_ramp") {
+    // Same craft — demote only tool/process must_haves the model over-labeled.
+    missingSkills = missingSkills.map((s) => {
+      if (s.learnability !== "must_have") return s;
+      if (looksLikeRampableToolGap(s.skill)) {
+        return {
+          ...s,
+          learnability: "learn_on_job" as const,
+          isHardRequirement: false,
+        };
+      }
+      // Non-tool must_have contradicts day_one/with_ramp — treat as blocker.
+      return s;
+    });
+    if (missingSkills.some((s) => s.learnability === "must_have")) {
+      coreCraftFit = "not_eligible";
     }
   }
 
@@ -385,10 +431,20 @@ function normalizeMatchResult(
     fitOut = Math.min(fitOut, 35);
   }
 
+  let feedbackRequirementMet =
+    typeof result.feedbackRequirementMet === "boolean"
+      ? result.feedbackRequirementMet
+      : true;
+  const feedbackNotes = result.feedbackNotes?.trim() || "";
+  if (!feedbackRequirementMet) {
+    fitOut = Math.min(fitOut, 35);
+  }
+
   const applyRecommendation =
     Boolean(result.applyRecommendation) &&
     skillRequirementMet &&
     commute.commuteRequirementMet &&
+    feedbackRequirementMet &&
     !isSkillIneligible({ skillRequirementMet, coreCraftFit, missingSkills }) &&
     fitOut >= 50 &&
     pathType !== "lateral";
@@ -432,6 +488,8 @@ function normalizeMatchResult(
     commuteRequirementMet: commute.commuteRequirementMet,
     commuteNotes: commute.commuteNotes,
     estimatedCommuteMinutes: commute.estimatedCommuteMinutes,
+    feedbackRequirementMet,
+    feedbackNotes,
     pathType,
     ladderPath: result.ladderPath?.trim() || "",
     matchedDestination: result.matchedDestination?.trim() || undefined,

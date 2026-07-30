@@ -7,7 +7,9 @@ import { Card, CardTitle } from "@/components/ui/card";
 import type {
   CandidateProfile,
   EducationRecommendation,
+  FeedbackPreferenceState,
   Job,
+  JobFeedback,
   JobMatch,
   UserProfile,
   Workflow,
@@ -24,13 +26,45 @@ import type { AiUsageRecord } from "@/lib/types/ai-usage";
 import { getCategoryTotals } from "@/lib/ai-usage/categories";
 import { isWorkflowActive, isWorkflowPaused } from "@/lib/workflows/stale";
 import { StatusBadge } from "@/components/ui/badge";
-import { Copy, FileText, Loader2, Pause, Sparkles, Trash2 } from "lucide-react";
-import { isCommuteIneligible, isSkillIneligible, groupMissingSkillsByLearnability } from "@/lib/job-search/hard-requirements";
+import { Copy, FileText, Loader2, MapPin, Pause, Sparkles, Trash2 } from "lucide-react";
+import {
+  isCommuteIneligible,
+  isFeedbackIneligible,
+  isSkillIneligible,
+  groupMissingSkillsByLearnability,
+} from "@/lib/job-search/hard-requirements";
 import {
   evidenceLabel,
   recommendationsForMatchGaps,
 } from "@/lib/education/helpers";
 import { formatCommuteMatchLine } from "@/lib/commute/helpers";
+import { groupJobsByLocationClump } from "@/lib/job-search/location-clump";
+import { JobFeedbackFlow } from "@/components/jobs/job-feedback-flow";
+
+const JOB_PATH_FILTERS_KEY = "career_os_jobs_path_filters";
+
+type JobPathFilterPrefs = {
+  showStretch: boolean;
+  showLateral: boolean;
+};
+
+function loadPathFilterPrefs(): JobPathFilterPrefs {
+  if (typeof window === "undefined") {
+    return { showStretch: false, showLateral: false };
+  }
+  try {
+    const raw = localStorage.getItem(JOB_PATH_FILTERS_KEY);
+    if (!raw) return { showStretch: false, showLateral: false };
+    const parsed = JSON.parse(raw) as Partial<JobPathFilterPrefs>;
+    return {
+      // Opinionated defaults: only step + destination until user opts in.
+      showStretch: parsed.showStretch === true,
+      showLateral: parsed.showLateral === true,
+    };
+  } catch {
+    return { showStretch: false, showLateral: false };
+  }
+}
 
 function formatJobSource(job: Job): string {
   const labels: Record<string, string> = {
@@ -120,12 +154,22 @@ export default function JobsPage() {
     UserProfile,
     "homeLocation" | "commuteMode" | "commuteMaxMinutes"
   > | null>(null);
+  const [jobsTab, setJobsTab] = useState<"matches" | "feedback">("matches");
+  const [groupByLocation, setGroupByLocation] = useState(false);
+  const [showStretch, setShowStretch] = useState(false);
+  const [showLateral, setShowLateral] = useState(false);
+  const [pathFiltersReady, setPathFiltersReady] = useState(false);
+  const [feedbacks, setFeedbacks] = useState<JobFeedback[]>([]);
+  const [feedbackPrefs, setFeedbackPrefs] =
+    useState<FeedbackPreferenceState | null>(null);
+  const [feedbackJob, setFeedbackJob] = useState<Job | null>(null);
+  const [clearingFeedback, setClearingFeedback] = useState(false);
   const [searchLanguage, setSearchLanguage] =
     useState<JobSearchLanguageSetting>("auto");
 
   const load = useCallback(async () => {
     try {
-      const [j, m, a, u, w, c, p] = await Promise.all([
+      const [j, m, a, u, w, c, p, fb] = await Promise.all([
         apiFetch("/api/data?type=jobs"),
         apiFetch("/api/data?type=matches"),
         apiFetch("/api/data?type=applications").catch(() => []),
@@ -133,6 +177,7 @@ export default function JobsPage() {
         apiFetch("/api/workflows/status?type=find_jobs").catch(() => null),
         apiFetch("/api/data?type=candidate").catch(() => null),
         apiFetch("/api/profile").catch(() => null),
+        apiFetch("/api/jobs/feedback").catch(() => null),
       ]);
       setJobs(j ?? []);
       setMatches(m ?? []);
@@ -161,6 +206,14 @@ export default function JobsPage() {
       if (profile?.settings?.jobSearchLanguage) {
         setSearchLanguage(profile.settings.jobSearchLanguage);
       }
+      if (fb && typeof fb === "object") {
+        const data = fb as {
+          feedbacks?: JobFeedback[];
+          preferences?: FeedbackPreferenceState | null;
+        };
+        setFeedbacks(data.feedbacks ?? []);
+        setFeedbackPrefs(data.preferences ?? null);
+      }
     } catch {
       // Keep existing jobs/matches visible if a poll fails (e.g. during pause).
     } finally {
@@ -171,6 +224,63 @@ export default function JobsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const prefs = loadPathFilterPrefs();
+    setShowStretch(prefs.showStretch);
+    setShowLateral(prefs.showLateral);
+    setPathFiltersReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!pathFiltersReady) return;
+    localStorage.setItem(
+      JOB_PATH_FILTERS_KEY,
+      JSON.stringify({ showStretch, showLateral } satisfies JobPathFilterPrefs)
+    );
+  }, [showStretch, showLateral, pathFiltersReady]);
+
+  // Once per page session: archive saved jobs that are closed or dead-linked.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = (await apiFetch("/api/jobs/revalidate-open", {
+          method: "POST",
+          body: JSON.stringify({}),
+        })) as { archived?: number };
+        if (!cancelled && (result?.archived ?? 0) > 0) {
+          await load();
+        }
+      } catch {
+        // Non-blocking — discovery still filters new finds.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch, load]);
+
+  // Once per page session: Indeed company reputation (Playwright; non-blocking).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = (await apiFetch("/api/jobs/enrich-reputation", {
+          method: "POST",
+          body: JSON.stringify({}),
+        })) as { updated?: number; skipped?: boolean };
+        if (!cancelled && (result?.updated ?? 0) > 0) {
+          await load();
+        }
+      } catch {
+        // Non-blocking — cards simply omit reputation.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch, load]);
 
   useEffect(() => {
     if (!finding) return;
@@ -304,12 +414,31 @@ export default function JobsPage() {
   const matchMap = new Map(matches.map((m) => [m.jobId, m]));
   const appByJobId = new Map(applications.map((a) => [a.jobId, a]));
 
-  const sortedJobs = [...jobs]
+  const eligibleJobs = [...jobs].filter((job) => {
+    if (job.status === "archived") return false;
+    if (job.listingOpenStatus === "closed" || job.listingOpenStatus === "dead") {
+      return false;
+    }
+    const match = matchMap.get(job.id);
+    if (match?.languageRequirementMet === false) return false;
+    if (isSkillIneligible(match)) return false;
+    if (isCommuteIneligible(match)) return false;
+    if (isFeedbackIneligible(match)) return false;
+    return true;
+  });
+
+  const stretchCount = eligibleJobs.filter(
+    (j) => matchMap.get(j.id)?.pathType === "stretch"
+  ).length;
+  const lateralCount = eligibleJobs.filter(
+    (j) => matchMap.get(j.id)?.pathType === "lateral"
+  ).length;
+
+  const sortedJobs = eligibleJobs
     .filter((job) => {
-      const match = matchMap.get(job.id);
-      if (match?.languageRequirementMet === false) return false;
-      if (isSkillIneligible(match)) return false;
-      if (isCommuteIneligible(match)) return false;
+      const path = matchMap.get(job.id)?.pathType;
+      if (path === "stretch" && !showStretch) return false;
+      if (path === "lateral" && !showLateral) return false;
       return true;
     })
     .sort((a, b) => {
@@ -318,11 +447,83 @@ export default function JobsPage() {
       const fitDiff = (mb?.fitScore ?? -1) - (ma?.fitScore ?? -1);
       if (fitDiff !== 0) return fitDiff;
       const pathRank = (t?: string) =>
-        t === "destination" ? 4 : t === "step" ? 3 : t === "stretch" ? 2 : t === "lateral" ? 0 : 1;
+        t === "destination"
+          ? 4
+          : t === "step"
+            ? 3
+            : t === "stretch"
+              ? 2
+              : t === "lateral"
+                ? 0
+                : 1;
       const scopeDiff = (mb?.scopeIncrease ?? 0) - (ma?.scopeIncrease ?? 0);
       if (scopeDiff !== 0) return scopeDiff;
       return pathRank(mb?.pathType) - pathRank(ma?.pathType);
     });
+
+  const jobSections = groupByLocation
+    ? groupJobsByLocationClump(sortedJobs)
+    : [{ key: "all", label: null as string | null, jobs: sortedJobs }];
+
+  async function handleClearFeedback() {
+    if (
+      !confirm(
+        "Clear all listing feedback and learned filters? Hidden jobs will show again."
+      )
+    ) {
+      return;
+    }
+    setClearingFeedback(true);
+    try {
+      await apiFetch("/api/jobs/feedback", {
+        method: "DELETE",
+        body: JSON.stringify({}),
+      });
+      await load();
+      setJobsTab("matches");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to clear feedback");
+    } finally {
+      setClearingFeedback(false);
+    }
+  }
+
+  async function handleDeleteOneFeedback(id: string) {
+    setClearingFeedback(true);
+    try {
+      await apiFetch("/api/jobs/feedback", {
+        method: "DELETE",
+        body: JSON.stringify({ id }),
+      });
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to remove feedback");
+    } finally {
+      setClearingFeedback(false);
+    }
+  }
+
+  async function handleRemoveConstraint(constraint: string) {
+    if (
+      !confirm(
+        `Remove this search filter?\n\n"${constraint}"\n\nJobs that were hidden only because of this rule can show up again.`
+      )
+    ) {
+      return;
+    }
+    setClearingFeedback(true);
+    try {
+      await apiFetch("/api/jobs/feedback", {
+        method: "DELETE",
+        body: JSON.stringify({ constraint }),
+      });
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to remove filter");
+    } finally {
+      setClearingFeedback(false);
+    }
+  }
 
   const categoryTotals = aiUsage ? getCategoryTotals(aiUsage) : null;
   const jobSearchUsage = categoryTotals?.job_search ?? null;
@@ -579,7 +780,224 @@ export default function JobsPage() {
         </Card>
       )}
 
-      {loading && jobs.length === 0 ? (
+      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 pb-2">
+        <button
+          type="button"
+          onClick={() => setJobsTab("matches")}
+          className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+            jobsTab === "matches"
+              ? "bg-zinc-900 text-white"
+              : "text-zinc-600 hover:bg-zinc-100"
+          }`}
+        >
+          Matches ({sortedJobs.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setJobsTab("feedback")}
+          className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+            jobsTab === "feedback"
+              ? "bg-zinc-900 text-white"
+              : "text-zinc-600 hover:bg-zinc-100"
+          }`}
+        >
+          Taught prefs ({feedbacks.length})
+        </button>
+        {jobsTab === "matches" && (
+          <div className="flex flex-wrap items-center gap-1.5 sm:ml-2">
+            <span className="hidden text-[10px] font-medium uppercase tracking-wide text-zinc-400 sm:inline">
+              Also show
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowStretch((v) => !v)}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                showStretch
+                  ? "bg-violet-600 text-white"
+                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+              }`}
+              title={
+                showStretch
+                  ? "Stretch roles are visible — click to hide ambitious 1–2 year climbs"
+                  : "Hidden by default — ambitious ladder climbs (~1–2 years). Click to include."
+              }
+            >
+              Stretch
+              {stretchCount > 0 ? ` (${stretchCount})` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLateral((v) => !v)}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                showLateral
+                  ? "bg-zinc-700 text-white"
+                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+              }`}
+              title={
+                showLateral
+                  ? "Lateral moves are visible — click to hide same-scope title clones"
+                  : "Hidden by default — same-scope / title-clone moves. Click to include."
+              }
+            >
+              Lateral
+              {lateralCount > 0 ? ` (${lateralCount})` : ""}
+            </button>
+          </div>
+        )}
+        {jobsTab === "matches" && sortedJobs.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setGroupByLocation((v) => !v)}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${
+              groupByLocation
+                ? "bg-zinc-900 text-white"
+                : "text-zinc-600 hover:bg-zinc-100"
+            }`}
+            title="Clump matches by city / place"
+          >
+            <MapPin className="h-3.5 w-3.5" />
+            {groupByLocation ? "Grouped by location" : "Group by location"}
+          </button>
+        )}
+      </div>
+
+      {jobsTab === "matches" &&
+        !showStretch &&
+        !showLateral &&
+        (stretchCount > 0 || lateralCount > 0) && (
+          <p className="text-xs text-zinc-500">
+            Showing next steps &amp; destinations only.
+            {!showStretch && stretchCount > 0 && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="font-medium text-violet-700 underline-offset-2 hover:underline"
+                  onClick={() => setShowStretch(true)}
+                >
+                  Include {stretchCount} stretch
+                </button>
+              </>
+            )}
+            {!showLateral && lateralCount > 0 && (
+              <>
+                {stretchCount > 0 ? " · " : " "}
+                <button
+                  type="button"
+                  className="font-medium text-zinc-700 underline-offset-2 hover:underline"
+                  onClick={() => setShowLateral(true)}
+                >
+                  Include {lateralCount} lateral
+                </button>
+              </>
+            )}
+          </p>
+        )}
+
+      {feedbackJob && (
+        <JobFeedbackFlow
+          job={feedbackJob}
+          apiFetch={apiFetch}
+          onCancel={() => setFeedbackJob(null)}
+          onDone={async () => {
+            setFeedbackJob(null);
+            await load();
+          }}
+        />
+      )}
+
+      {jobsTab === "feedback" ? (
+        <Card>
+          <CardTitle>What you taught Career OS</CardTitle>
+          {feedbackPrefs?.guidanceSummary && (
+            <p className="mt-2 text-sm text-zinc-600">
+              {feedbackPrefs.guidanceSummary}
+            </p>
+          )}
+          {feedbackPrefs?.learnedConstraints &&
+            feedbackPrefs.learnedConstraints.length > 0 && (
+              <ul className="mt-3 space-y-2 text-sm text-zinc-700">
+                {feedbackPrefs.learnedConstraints.map((c) => (
+                  <li
+                    key={c}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-zinc-100 px-3 py-2"
+                  >
+                    <span>{c}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs text-red-600 hover:underline"
+                      disabled={clearingFeedback}
+                      title="Remove this filter — matching jobs can reappear"
+                      onClick={() => void handleRemoveConstraint(c)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          {feedbackPrefs?.experienceCeiling && (
+            <p className="mt-2 text-xs text-zinc-500">
+              Soft search ceiling: {feedbackPrefs.experienceCeiling}
+            </p>
+          )}
+          <div className="mt-4 space-y-3">
+            {feedbacks.length === 0 ? (
+              <p className="text-sm text-zinc-500">
+                No feedback yet. On a match, click &quot;Not a fit — teach AI&quot;
+                — the AI may push back if it disagrees.
+              </p>
+            ) : (
+              feedbacks.map((fb) => (
+                <div
+                  key={fb.id}
+                  className="rounded-lg border border-zinc-100 px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="font-medium">
+                      {fb.jobTitle} @ {fb.company}
+                    </p>
+                    <button
+                      type="button"
+                      className="text-xs text-red-600 hover:underline"
+                      disabled={clearingFeedback}
+                      onClick={() => void handleDeleteOneFeedback(fb.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <p className="mt-1 text-zinc-600">You: {fb.reason}</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">
+                    {fb.theme.replace(/_/g, " ")} ·{" "}
+                    {fb.aiStance.replace(/_/g, " ")}
+                    {fb.learn ? " · learned" : " · hide only"}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-600">
+                    {fb.constraintSummary}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+          {feedbacks.length > 0 && (
+            <div className="mt-4">
+              <Button
+                variant="secondary"
+                disabled={clearingFeedback}
+                onClick={() => void handleClearFeedback()}
+              >
+                {clearingFeedback ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Clearing…
+                  </>
+                ) : (
+                  "Clear all feedback & show everything"
+                )}
+              </Button>
+            </div>
+          )}
+        </Card>
+      ) : loading && jobs.length === 0 ? (
         <p className="text-zinc-500">Loading jobs...</p>
       ) : jobs.length === 0 && !finding ? (
         <Card>
@@ -594,8 +1012,18 @@ export default function JobsPage() {
           </p>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {sortedJobs.map((job) => {
+        <div className="space-y-6">
+          {jobSections.map((section) => (
+            <div key={section.key} className="space-y-4">
+              {section.label ? (
+                <h3 className="sticky top-0 z-10 -mx-1 border-b border-zinc-200 bg-zinc-50/95 px-1 py-2 text-sm font-semibold tracking-tight text-zinc-800 backdrop-blur-sm">
+                  {section.label}
+                  <span className="ml-2 font-normal text-zinc-500">
+                    {section.jobs.length}
+                  </span>
+                </h3>
+              ) : null}
+              {section.jobs.map((job) => {
             const match = matchMap.get(job.id);
             const application = appByJobId.get(job.id);
             const isApplying =
@@ -621,6 +1049,32 @@ export default function JobsPage() {
                       <p className="text-sm text-zinc-500">
                         {job.company} · {job.location}
                       </p>
+                      {job.companyReputation?.status === "ok" &&
+                      typeof job.companyReputation.rating === "number" ? (
+                        job.companyReputation.sourceUrl ? (
+                          <a
+                            href={job.companyReputation.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
+                            title="Indeed company reviews"
+                          >
+                            Indeed {job.companyReputation.rating.toFixed(1)}
+                            {typeof job.companyReputation.reviewCount ===
+                            "number"
+                              ? ` · ${job.companyReputation.reviewCount.toLocaleString()} reviews`
+                              : ""}
+                          </a>
+                        ) : (
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
+                            Indeed {job.companyReputation.rating.toFixed(1)}
+                            {typeof job.companyReputation.reviewCount ===
+                            "number"
+                              ? ` · ${job.companyReputation.reviewCount.toLocaleString()} reviews`
+                              : ""}
+                          </span>
+                        )
+                      ) : null}
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                           listingLang === "nl"
@@ -880,6 +1334,15 @@ export default function JobsPage() {
                         Recommended to apply
                       </span>
                     )}
+                    <div className="pt-1">
+                      <Button
+                        variant="secondary"
+                        className="text-xs"
+                        onClick={() => setFeedbackJob(job)}
+                      >
+                        Not a fit — teach AI
+                      </Button>
+                    </div>
                   </div>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1055,6 +1518,8 @@ export default function JobsPage() {
               </Card>
             );
           })}
+            </div>
+          ))}
         </div>
       )}
     </div>

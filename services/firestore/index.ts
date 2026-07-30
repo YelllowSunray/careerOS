@@ -8,10 +8,13 @@ import type {
   CandidateProfile,
   Job,
   JobMatch,
+  JobFeedback,
+  FeedbackPreferenceState,
   Application,
   Workflow,
   PortfolioSite,
   BrowserSession,
+  CompanyReputationCache,
 } from "@/lib/types";
 import type { LinkedInProfileData } from "@/lib/types/integrations";
 
@@ -28,6 +31,9 @@ export const COLLECTIONS = {
   linkedInProfiles: "linkedInProfiles",
   /** Persists evaluated listing keys across pause/restart until Clear Results. */
   jobSearchState: "jobSearchState",
+  jobFeedbacks: "jobFeedbacks",
+  feedbackPreferences: "feedbackPreferences",
+  companyReputations: "companyReputations",
 } as const;
 
 const db = () => getAdminFirestore();
@@ -129,6 +135,7 @@ export async function clearUserJobSearchResults(userId: string): Promise<void> {
   appsSnap.docs.forEach((doc) => batch.delete(doc.ref));
   // Reset evaluated-listing memory so the next search may re-open rejects/accepts.
   batch.delete(db().collection(COLLECTIONS.jobSearchState).doc(userId));
+  // Keep taught feedback prefs — user clears those explicitly on the Feedback tab.
 
   await batch.commit();
 }
@@ -314,3 +321,68 @@ export async function getLinkedInProfile(
     .get();
   return snap.exists ? (snap.data() as LinkedInProfileData) : null;
 }
+
+export async function saveJobFeedback(feedback: JobFeedback): Promise<void> {
+  await setDoc(COLLECTIONS.jobFeedbacks, feedback.id, feedback);
+}
+
+export async function getJobFeedbacks(userId: string): Promise<JobFeedback[]> {
+  const snap = await db()
+    .collection(COLLECTIONS.jobFeedbacks)
+    .where("userId", "==", userId)
+    .get();
+  return snap.docs
+    .map((d) => d.data() as JobFeedback)
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+}
+
+export async function deleteJobFeedback(id: string): Promise<void> {
+  await db().collection(COLLECTIONS.jobFeedbacks).doc(id).delete();
+}
+
+export async function clearJobFeedbacks(userId: string): Promise<void> {
+  const snap = await db()
+    .collection(COLLECTIONS.jobFeedbacks)
+    .where("userId", "==", userId)
+    .get();
+  const batch = db().batch();
+  snap.docs.forEach((doc) => batch.delete(doc.ref));
+  batch.delete(db().collection(COLLECTIONS.feedbackPreferences).doc(userId));
+  await batch.commit();
+}
+
+export async function getFeedbackPreferenceState(
+  userId: string
+): Promise<FeedbackPreferenceState | null> {
+  const snap = await db()
+    .collection(COLLECTIONS.feedbackPreferences)
+    .doc(userId)
+    .get();
+  return snap.exists ? (snap.data() as FeedbackPreferenceState) : null;
+}
+
+export async function saveFeedbackPreferenceState(
+  state: FeedbackPreferenceState
+): Promise<void> {
+  await setDoc(COLLECTIONS.feedbackPreferences, state.userId, state);
+}
+
+export async function getCompanyReputationCache(
+  id: string
+): Promise<CompanyReputationCache | null> {
+  const snap = await db()
+    .collection(COLLECTIONS.companyReputations)
+    .doc(id)
+    .get();
+  return snap.exists ? (snap.data() as CompanyReputationCache) : null;
+}
+
+export async function saveCompanyReputationCache(
+  entry: CompanyReputationCache
+): Promise<void> {
+  await setDoc(COLLECTIONS.companyReputations, entry.id, entry);
+}
+

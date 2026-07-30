@@ -18,6 +18,10 @@ const JOB_SEARCH_OPS = new Set([
   "job_parse",
   "job_match",
   "education_recommend",
+  "job_feedback_review",
+  "job_feedback_resynth",
+  "job_feedback_apply",
+  "listing_open_check",
 ]);
 
 const APPLICATION_OPS = new Set([

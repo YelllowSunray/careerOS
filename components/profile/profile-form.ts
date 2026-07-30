@@ -1,9 +1,10 @@
-import type { CommuteMode, UserProfile, WorkPreference } from "@/lib/types";
+import type { CommuteMode, UserProfile, WorkArrangement } from "@/lib/types";
 import {
   commuteMaxMinutesToForm,
   parseCommuteMaxMinutesFromForm,
 } from "@/lib/commute/helpers";
 import { normalizePreferredCountries } from "@/lib/job-search/countries";
+import { normalizeWorkPreferences } from "@/lib/job-search/work-preference";
 
 export interface ProfileFormValues {
   name: string;
@@ -13,7 +14,7 @@ export interface ProfileFormValues {
   githubUrl: string;
   portfolioUrls: string;
   preferredCountry: string;
-  workPreference: WorkPreference;
+  workPreferences: WorkArrangement[];
   jobPreferences: string;
   /** Comma-separated language names */
   languagesSpoken: string;
@@ -48,7 +49,7 @@ export function profileToFormValues(
     githubUrl: profile.githubUrl ?? "",
     portfolioUrls: profile.portfolioUrls.join(", "),
     preferredCountry: profile.preferredCountries[0] ?? "",
-    workPreference: profile.workPreference,
+    workPreferences: normalizeWorkPreferences(profile),
     jobPreferences: profile.jobPreferences ?? "",
     languagesSpoken: (profile.languagesSpoken ?? []).join(", "),
     homeLocation: profile.homeLocation ?? "",
@@ -87,7 +88,7 @@ export function formValuesToProfileUpdate(
       .map((u) => u.trim())
       .filter(Boolean),
     preferredCountries: normalizePreferredCountries(values.preferredCountry),
-    workPreference: values.workPreference,
+    workPreferences: values.workPreferences,
     jobPreferences: values.jobPreferences.trim() || undefined,
     languagesSpoken: languages.length > 0 ? languages : [],
     homeLocation,

@@ -31,12 +31,20 @@ export async function getSignedUploadUrl(
   return url;
 }
 
-export async function getSignedDownloadUrl(path: string): Promise<string> {
+export async function getSignedDownloadUrl(
+  path: string,
+  fileName?: string
+): Promise<string> {
   const bucket = getAdminStorage().bucket();
   const [url] = await bucket.file(path).getSignedUrl({
     version: "v4",
     action: "read",
     expires: Date.now() + 60 * 60 * 1000,
+    ...(fileName
+      ? {
+          responseDisposition: `attachment; filename="${fileName.replace(/"/g, "")}"`,
+        }
+      : {}),
   });
   return url;
 }

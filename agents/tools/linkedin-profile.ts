@@ -6,20 +6,53 @@ import { z } from "zod";
 import type { LinkedInProfileData } from "@/lib/types/integrations";
 import { nowIso } from "@/lib/utils/dates";
 
-const extractSchema = z.object({
-  headline: z.string().optional(),
-  summary: z.string().optional(),
-  skills: z.array(z.string()).default([]),
-  experience: z
-    .array(
-      z.object({
-        title: z.string(),
-        company: z.string(),
-        description: z.string().default(""),
-      })
-    )
-    .default([]),
-});
+function normalizeLinkedInExtract(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const o = raw as Record<string, unknown>;
+  const nullToUndef = (v: unknown) =>
+    v == null || v === "" ? undefined : String(v);
+
+  return {
+    headline: nullToUndef(o.headline),
+    summary: nullToUndef(o.summary),
+    skills: Array.isArray(o.skills)
+      ? o.skills.map((s) => String(s ?? "").trim()).filter(Boolean)
+      : [],
+    experience: Array.isArray(o.experience)
+      ? o.experience
+          .map((e) => {
+            const exp = (e ?? {}) as Record<string, unknown>;
+            const title = String(exp.title ?? "").trim();
+            const company = String(exp.company ?? "").trim();
+            if (!title && !company) return null;
+            return {
+              title: title || "Role",
+              company: company || "Unknown",
+              description: String(exp.description ?? ""),
+            };
+          })
+          .filter(Boolean)
+      : [],
+  };
+}
+
+const extractSchema = z.preprocess(
+  normalizeLinkedInExtract,
+  z.object({
+    headline: z.string().optional(),
+    summary: z.string().optional(),
+    skills: z.array(z.string()).default([]),
+    experience: z
+      .array(
+        z.object({
+          title: z.string(),
+          company: z.string(),
+          description: z.string().default(""),
+        })
+      )
+      .default([]),
+  })
+);
 
 /** Normalize to a canonical public profile URL. */
 export function normalizeLinkedInProfileUrl(url: string): string | null {
@@ -172,8 +205,8 @@ Only use information present in the text. Do not invent.
 
 Return JSON:
 {
-  "headline": "string optional",
-  "summary": "string optional About section",
+  "headline": "string or omit if unknown (never null)",
+  "summary": "string About section or omit if unknown (never null)",
   "skills": ["string"],
   "experience": [{ "title": "string", "company": "string", "description": "string" }]
 }

@@ -6,7 +6,7 @@ import { useApi } from "@/lib/hooks/use-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { ProfileDetailsCard } from "@/components/profile/profile-details-card";
-import type { UserProfile, CandidateProfile, ResumeData, Workflow } from "@/lib/types";
+import type { UserProfile, CandidateProfile, ResumeData, Workflow, FeedbackPreferenceState } from "@/lib/types";
 import type { AiUsageRecord } from "@/lib/types/ai-usage";
 import {
   AI_USAGE_CATEGORY_LABELS,
@@ -14,7 +14,7 @@ import {
   type AiUsageCategory,
 } from "@/lib/ai-usage/categories";
 import { isWorkflowActive, logWorkflowToConsole } from "@/lib/workflows/stale";
-import { FileText, Loader2, RefreshCw, Sparkles, Trash2, Upload } from "lucide-react";
+import { Download, FileText, Loader2, RefreshCw, Sparkles, Trash2, Upload } from "lucide-react";
 import { RESUME_ACCEPT, isAllowedResumeFile, resumeFileTypeLabel } from "@/lib/resume/files";
 
 export default function ProfilePage() {
@@ -28,9 +28,13 @@ export default function ProfilePage() {
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const [uploadingResume, setUploadingResume] = useState(false);
+  const [downloadingResume, setDownloadingResume] = useState(false);
   const [deletingResume, setDeletingResume] = useState(false);
   const [uploadingCoverLetter, setUploadingCoverLetter] = useState(false);
   const [deletingCoverLetterId, setDeletingCoverLetterId] = useState<string | null>(null);
+  const [feedbackPrefs, setFeedbackPrefs] =
+    useState<FeedbackPreferenceState | null>(null);
+  const [removingConstraint, setRemovingConstraint] = useState<string | null>(null);
 
   const logError = (label: string, e: unknown) => {
     console.error(`[Profile] ${label}:`, e);
@@ -38,7 +42,7 @@ export default function ProfilePage() {
 
   const loadData = useCallback(async () => {
     setProfileLoadError(null);
-    const [p, c, r, w, u] = await Promise.all([
+    const [p, c, r, w, u, fb] = await Promise.all([
       apiFetch("/api/profile").catch((e) => {
         const message = e instanceof Error ? e.message : "Failed to load profile";
         logError("load profile", e);
@@ -61,12 +65,20 @@ export default function ProfilePage() {
         logError("load ai usage", e);
         return null;
       }),
+      apiFetch("/api/jobs/feedback").catch((e) => {
+        logError("load feedback preferences", e);
+        return null;
+      }),
     ]);
     setProfile(p);
     setCandidate(c);
     setResume(r);
     setWorkflow(w);
     setAiUsage(u);
+    setFeedbackPrefs(
+      (fb as { preferences?: FeedbackPreferenceState | null } | null)?.preferences ??
+        null
+    );
 
     if (w && (w.status === "failed" || w.error)) {
       logWorkflowToConsole(w, "Processing");
@@ -175,6 +187,27 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleDownloadResume() {
+    if (!profile?.resume) return;
+    setDownloadingResume(true);
+    try {
+      const result = await apiFetch<{ url: string; fileName: string }>(
+        "/api/resume/download"
+      );
+      const link = document.createElement("a");
+      link.href = result.url;
+      link.download = result.fileName;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to download resume");
+    } finally {
+      setDownloadingResume(false);
+    }
+  }
+
   async function handleDeleteResume() {
     if (!profile?.resume) return;
     if (
@@ -245,6 +278,28 @@ export default function ProfilePage() {
       alert(e instanceof Error ? e.message : "Failed to delete cover letter");
     } finally {
       setDeletingCoverLetterId(null);
+    }
+  }
+
+  async function handleRemoveSearchFilter(constraint: string) {
+    if (
+      !confirm(
+        `Remove this search filter?\n\n"${constraint}"\n\nMatching jobs (e.g. consulting) can show up again in Jobs, and new searches will allow them.`
+      )
+    ) {
+      return;
+    }
+    setRemovingConstraint(constraint);
+    try {
+      const result = (await apiFetch("/api/jobs/feedback", {
+        method: "DELETE",
+        body: JSON.stringify({ constraint }),
+      })) as { preferences?: FeedbackPreferenceState };
+      setFeedbackPrefs(result.preferences ?? null);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to remove filter");
+    } finally {
+      setRemovingConstraint(null);
     }
   }
 
@@ -473,19 +528,36 @@ export default function ProfilePage() {
                   )}
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                className="shrink-0 self-start px-2 text-zinc-500 hover:text-red-600"
-                disabled={deletingResume || uploadingResume || isProcessing}
-                onClick={() => void handleDeleteResume()}
-                aria-label="Remove resume"
-              >
-                {deletingResume ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-              </Button>
+              <div className="flex shrink-0 items-center gap-1 self-start">
+                <Button
+                  variant="ghost"
+                  className="px-2 text-zinc-500 hover:text-zinc-900"
+                  disabled={
+                    downloadingResume || deletingResume || uploadingResume || isProcessing
+                  }
+                  onClick={() => void handleDownloadResume()}
+                  aria-label="Download resume"
+                >
+                  {downloadingResume ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="px-2 text-zinc-500 hover:text-red-600"
+                  disabled={deletingResume || uploadingResume || downloadingResume || isProcessing}
+                  onClick={() => void handleDeleteResume()}
+                  aria-label="Remove resume"
+                >
+                  {deletingResume ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
             </div>
           ) : (
             <p className="mt-4 text-sm text-zinc-500">No resume uploaded</p>
@@ -620,6 +692,61 @@ export default function ProfilePage() {
               PDF or Word · up to 5 files
             </p>
           </div>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardTitle>Search filters you taught</CardTitle>
+          <p className="mt-1 text-sm text-zinc-500">
+            Lessons from &quot;Not a fit — teach AI&quot; on Jobs. These hide matching
+            listings and steer new searches. Remove a filter to let those roles
+            show again.
+          </p>
+          {feedbackPrefs?.guidanceSummary &&
+            (feedbackPrefs.learnedConstraints?.length ?? 0) > 0 && (
+              <p className="mt-3 text-sm text-zinc-600">
+                {feedbackPrefs.guidanceSummary}
+              </p>
+            )}
+          {(feedbackPrefs?.learnedConstraints?.length ?? 0) > 0 ? (
+            <ul className="mt-3 space-y-2">
+              {feedbackPrefs!.learnedConstraints.map((c) => (
+                <li
+                  key={c}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-zinc-100 px-3 py-2 text-sm"
+                >
+                  <span className="text-zinc-800">{c}</span>
+                  <Button
+                    variant="ghost"
+                    className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    disabled={removingConstraint === c}
+                    onClick={() => void handleRemoveSearchFilter(c)}
+                  >
+                    {removingConstraint === c ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                        Remove
+                      </>
+                    )}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-zinc-500">
+              No active filters yet. On Jobs, open a match and use{" "}
+              <Link href="/jobs" className="font-medium text-zinc-800 underline">
+                Not a fit — teach AI
+              </Link>
+              .
+            </p>
+          )}
+          {feedbackPrefs?.experienceCeiling && (
+            <p className="mt-2 text-xs text-zinc-500">
+              Soft search ceiling: {feedbackPrefs.experienceCeiling}
+            </p>
+          )}
         </Card>
 
         <Card className="lg:col-span-2">

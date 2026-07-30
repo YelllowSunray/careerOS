@@ -21,6 +21,7 @@ import {
   unmetHardRequirementLabels,
 } from "@/lib/job-search/hard-requirements";
 import { fetchListingContent } from "@/agents/tools/listing-fetch";
+import { checkListingAvailability } from "@/agents/tools/listing-open";
 import { searchJobBoardsHttp } from "@/agents/tools/job-discovery-linkedin-guest";
 import { saveJob, saveJobMatch, getKnownJobIdentityKeys } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
@@ -31,6 +32,11 @@ import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { DiscoveredJobListing } from "@/agents/tools/job-discovery";
 import { isFindJobsStopped, isWorkflowPaused } from "@/lib/workflows/pause";
 import { getPrimaryCountry, effectiveRemotePreference } from "@/lib/job-search/countries";
+import {
+  isRemoteOnly,
+  normalizeWorkPreferences,
+  workPreferencesToSearchHint,
+} from "@/lib/job-search/work-preference";
 import {
   browserLocaleForSearch,
   detectListingLanguage,
@@ -188,7 +194,48 @@ async function listingsToMatchedJobs(
       const identityKey = listingIdentityKey(listing);
 
       try {
-        const text = await fetchListingContent(listing, listingBrowser);
+        let text = "";
+        let fetchFailed = false;
+        let fetchError = "";
+        try {
+          text = await fetchListingContent(listing, listingBrowser);
+        } catch (e) {
+          fetchFailed = true;
+          fetchError = e instanceof Error ? e.message : String(e);
+          text = [
+            `Title: ${listing.title}`,
+            `Company: ${listing.company}`,
+            listing.snippet ? `SEARCH RESULT SUMMARY:\n${listing.snippet}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+        }
+
+        const availability = await checkListingAvailability({
+          listing,
+          postingText: text,
+          userId: ctx.userId,
+          // LinkedIn HTTP fetch already proved reachability when it succeeded.
+          skipUrlProbe:
+            !fetchFailed &&
+            listing.platform === "linkedin" &&
+            text.length > 400,
+          fetchFailed,
+          fetchError,
+        });
+        if (!availability.acceptingApplications) {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (${availability.status}): ${listing.title} @ ${listing.company} — ${availability.reason}`
+          );
+          return { kind: "rejected" as const, identityKey };
+        }
+
+        if (fetchFailed && text.length < 80) {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (dead/unreadable): ${listing.title} — ${fetchError}`
+          );
+          return { kind: "rejected" as const, identityKey };
+        }
 
         if (!looksLikeJobPostingUrl(listing)) {
           const validation = await validateListingIsJobPosting(
@@ -244,6 +291,13 @@ async function listingsToMatchedJobs(
           return { kind: "rejected" as const, identityKey };
         }
 
+        if (matchResult.feedbackRequirementMet === false) {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (feedback): ${listing.title} @ ${listing.company} · ${matchResult.feedbackNotes || "violates taught preferences"}`
+          );
+          return { kind: "rejected" as const, identityKey };
+        }
+
         if (matchResult.fitScore < MIN_FIT_TO_SAVE) {
           console.log(
             `[Job discovery] [${platform}] Rejected (${matchResult.fitScore}): ${listing.title} @ ${listing.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
@@ -284,6 +338,9 @@ async function listingsToMatchedJobs(
           ),
           discoveredAt: nowIso(),
           status: "discovered",
+          listingOpenStatus: availability.status,
+          listingOpenNotes: availability.reason,
+          listingOpenCheckedAt: nowIso(),
         };
 
         const match: JobMatch = {
@@ -312,6 +369,8 @@ async function listingsToMatchedJobs(
           commuteRequirementMet: matchResult.commuteRequirementMet,
           commuteNotes: matchResult.commuteNotes,
           estimatedCommuteMinutes: matchResult.estimatedCommuteMinutes,
+          feedbackRequirementMet: matchResult.feedbackRequirementMet,
+          feedbackNotes: matchResult.feedbackNotes,
           scopeIncrease: matchResult.scopeIncrease,
           scopeNotes: matchResult.scopeNotes,
           pathType: matchResult.pathType,
@@ -452,11 +511,13 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
         console.log(
           `[Job discovery] Round ${round}: board pagination offset=${pageOffset}`
         );
+        const workPrefs = normalizeWorkPreferences(input.context.profile);
+        const searchHint = workPreferencesToSearchHint(workPrefs);
         const remotePref = effectiveRemotePreference(
-          input.context.profile.workPreference,
+          searchHint,
           input.context.profile.jobPreferences
         );
-        if (remotePref === "remote" && input.context.profile.workPreference !== "remote") {
+        if (remotePref === "remote" && !isRemoteOnly(workPrefs)) {
           console.log(
             "[Job discovery] Treating search as remote (from job preferences text)"
           );

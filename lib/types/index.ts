@@ -1,6 +1,8 @@
 import type { Timestamp } from "firebase-admin/firestore";
 
 export type WorkPreference = "remote" | "hybrid" | "onsite" | "any";
+/** Selectable work arrangements on the candidate profile (multi-select). */
+export type WorkArrangement = "remote" | "hybrid" | "onsite";
 export type CommuteMode = "car" | "bike" | "public_transit" | "walk";
 export type ExperienceLevel = "junior" | "mid" | "senior" | "staff" | "principal";
 export type ApplicationStatus =
@@ -90,7 +92,12 @@ export interface UserProfile {
   githubUrl?: string;
   portfolioUrls: string[];
   preferredCountries: string[];
-  workPreference: WorkPreference;
+  /**
+   * Accepted work arrangements (multi-select). Empty = any of remote / hybrid / on-site.
+   */
+  workPreferences: WorkArrangement[];
+  /** @deprecated Legacy single value — prefer workPreferences. Normalized on read. */
+  workPreference?: WorkPreference;
   /** Free-text: employment type, schedule, location, industry, seniority, etc. */
   jobPreferences?: string;
   /** Languages the candidate speaks (e.g. English, Dutch). Used as a hard job-eligibility filter. */
@@ -291,6 +298,38 @@ export interface Job {
   discoveredVia: string[];
   discoveredAt: string;
   status: "discovered" | "matched" | "archived";
+  /** Whether the posting still looks open / link alive */
+  listingOpenStatus?: "open" | "closed" | "dead" | "unknown";
+  listingOpenNotes?: string;
+  listingOpenCheckedAt?: string;
+  /** Indeed (or later) employee-satisfaction snapshot — denormalized for the card */
+  companyReputation?: CompanyReputation;
+}
+
+export type CompanyReputationStatus = "ok" | "not_found" | "unavailable";
+
+export interface CompanyReputation {
+  rating?: number;
+  reviewCount?: number;
+  source: "indeed";
+  sourceUrl?: string;
+  summary?: string;
+  status: CompanyReputationStatus;
+  checkedAt: string;
+}
+
+/** Shared cache doc for company reputation (keyed by normalized company name). */
+export interface CompanyReputationCache {
+  id: string;
+  companyName: string;
+  rating?: number;
+  reviewCount?: number;
+  source: "indeed";
+  sourceUrl?: string;
+  summary?: string;
+  status: CompanyReputationStatus;
+  checkedAt: string;
+  notes?: string;
 }
 
 export type GapLearnability = "must_have" | "learn_on_job" | "nice_to_have";
@@ -368,7 +407,94 @@ export interface JobMatch {
   ladderPath?: string;
   /** Ladder destination title this job maps to, if any */
   matchedDestination?: string;
+  /**
+ * AI hard gate from user listing feedback (e.g. "too senior").
+ * false = hide while that feedback is active. Undefined = no feedback filter applied.
+ */
+  feedbackRequirementMet?: boolean;
+  feedbackNotes?: string;
+  /** Feedback ids that caused a hide decision */
+  violatedFeedbackIds?: string[];
   matchedAt: string;
+}
+
+/** How strongly the AI agrees with the user's dislike. */
+export type FeedbackAiStance =
+  | "agree"
+  | "soft_pushback"
+  | "strong_pushback";
+
+/** Theme the AI inferred — free judgment, not a fixed enum ban list. */
+export type FeedbackTheme =
+  | "too_senior"
+  | "too_junior"
+  | "wrong_craft"
+  | "location_commute"
+  | "compensation"
+  | "company_stage"
+  | "schedule_type"
+  | "other";
+
+/**
+ * User dislike / preference feedback on a listing.
+ * Drives AI filtering of other jobs after the user confirms learning.
+ */
+export interface JobFeedback {
+  id: string;
+  userId: string;
+  jobId: string;
+  jobTitle: string;
+  company: string;
+  /** Free-text reason from the user */
+  reason: string;
+  /** Optional chip the user picked (hint only — AI reclassifies) */
+  reasonHint?: string;
+  /** AI-inferred theme after review */
+  theme: FeedbackTheme;
+  /**
+   * AI-normalized constraint used when filtering other jobs
+   * (e.g. "Avoid roles clearly above mid-level / requiring 10+ years leadership").
+   */
+  constraintSummary: string;
+  /** AI stance when the feedback was reviewed */
+  aiStance: FeedbackAiStance;
+  /** What the AI told the user (pushback or agreement) */
+  aiExplanation: string;
+  /**
+   * true = user confirmed "hide & learn" after AI review.
+   * Pending reviews are not stored until confirm (or stored as draft — we only save on confirm).
+   */
+  learn: boolean;
+  /** Hide this specific job even if learn=false ("hide this only") */
+  hideJob: boolean;
+  createdAt: string;
+}
+
+/** Durable AI-synthesized search/match guidance from confirmed feedback. */
+export interface FeedbackPreferenceState {
+  userId: string;
+  /** Human-readable bullets injected into search + match prompts */
+  learnedConstraints: string[];
+  /** One-paragraph strategy for the AI */
+  guidanceSummary: string;
+  /**
+   * Soft ceiling on target seniority when user confirmed "too senior" style feedback.
+   * Does not rewrite the career ladder — only biases search/match.
+   */
+  experienceCeiling?: ExperienceLevel;
+  /** Job ids explicitly hidden by feedback */
+  hiddenJobIds: string[];
+  updatedAt: string;
+}
+
+/** AI review of a dislike before the user confirms learning. */
+export interface FeedbackReviewResult {
+  theme: FeedbackTheme;
+  aiStance: FeedbackAiStance;
+  aiExplanation: string;
+  constraintSummary: string;
+  proposedExperienceCeiling?: ExperienceLevel;
+  userLikelyCorrect: boolean;
 }
 
 export type CoverLetterLanguage = "en" | "nl";

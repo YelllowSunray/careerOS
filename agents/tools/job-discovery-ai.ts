@@ -12,6 +12,10 @@ import {
   inferExperienceLevelFromContext,
   seniorityLabel,
 } from "@/lib/job-search/tailored-queries";
+import {
+  formatWorkPreferences,
+  normalizeWorkPreferences,
+} from "@/lib/job-search/work-preference";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { DiscoveredJobListing } from "./job-discovery";
 import type { ExperienceLevel } from "@/lib/types";
@@ -42,7 +46,9 @@ export async function filterListingsForCandidate(
 
   const candidateBlock = formatContextForPrompt(context, 10000);
   const ladderBlock = formatCareerLadderForPrompt(context);
-  const workPref = context.profile.workPreference;
+  const workPref = formatWorkPreferences(
+    normalizeWorkPreferences(context.profile)
+  );
   const countries = context.profile.preferredCountries.join(", ") || "any";
   const jobPrefs = context.profile.jobPreferences?.trim();
   const level = targetLevel ?? inferExperienceLevelFromContext(context);

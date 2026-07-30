@@ -79,8 +79,50 @@ export function normalizeResumeExtraction(raw: unknown): unknown {
           };
         })
       : [],
-    education: Array.isArray(o.education) ? o.education : [],
-    certifications: Array.isArray(o.certifications) ? o.certifications : [],
+    education: Array.isArray(o.education)
+      ? o.education.map((e) => {
+          const edu = (e ?? {}) as Record<string, unknown>;
+          const graduationYear =
+            edu.graduationYear ?? edu.year ?? edu.dates ?? edu.date;
+          return {
+            institution: String(edu.institution ?? edu.school ?? ""),
+            degree: String(edu.degree ?? edu.program ?? edu.name ?? ""),
+            field: edu.field ? String(edu.field) : undefined,
+            graduationYear: graduationYear
+              ? String(graduationYear)
+              : undefined,
+          };
+        })
+      : [],
+    certifications: Array.isArray(o.certifications)
+      ? o.certifications
+          .map((c) => {
+            if (typeof c === "string") {
+              const name = c.trim();
+              return name ? { name } : null;
+            }
+            if (!c || typeof c !== "object") return null;
+            const cert = c as Record<string, unknown>;
+            const name = String(cert.name ?? cert.title ?? cert.certification ?? "").trim();
+            if (!name) return null;
+            return {
+              name,
+              issuer: cert.issuer
+                ? String(cert.issuer)
+                : cert.organization
+                  ? String(cert.organization)
+                  : undefined,
+              year: cert.year
+                ? String(cert.year)
+                : cert.date
+                  ? String(cert.date)
+                  : undefined,
+            };
+          })
+          .filter((c): c is { name: string; issuer?: string; year?: string } =>
+            Boolean(c)
+          )
+      : [],
   };
 }
 
@@ -542,6 +584,19 @@ export function normalizeJobMatch(raw: unknown): unknown {
       ? Math.round(estimatedCommuteMinutesRaw)
       : undefined;
 
+  let feedbackRequirementMet =
+    o.feedbackRequirementMet ?? o.feedback_requirement_met;
+  if (typeof feedbackRequirementMet === "string") {
+    const s = feedbackRequirementMet.toLowerCase().trim();
+    feedbackRequirementMet = s === "true" || s === "yes" || s === "met";
+  }
+  if (typeof feedbackRequirementMet !== "boolean") {
+    feedbackRequirementMet = true;
+  }
+  const feedbackNotes = String(
+    o.feedbackNotes ?? o.feedback_notes ?? ""
+  ).trim();
+
   const scopeIncrease = scoreOrUndef(
     o.scopeIncrease ?? o.scope_increase ?? details?.scopeIncrease
   );
@@ -588,6 +643,8 @@ export function normalizeJobMatch(raw: unknown): unknown {
     ...(estimatedCommuteMinutes !== undefined
       ? { estimatedCommuteMinutes }
       : {}),
+    feedbackRequirementMet,
+    feedbackNotes,
     scopeIncrease: scopeIncrease ?? 40,
     scopeNotes,
     pathType,
@@ -1074,3 +1131,141 @@ export function normalizeEducationRecommendations(raw: unknown): unknown {
   };
 }
 
+const FEEDBACK_THEMES = new Set([
+  "too_senior",
+  "too_junior",
+  "wrong_craft",
+  "location_commute",
+  "compensation",
+  "company_stage",
+  "schedule_type",
+  "other",
+]);
+
+/** Map free-form Gemini theme labels onto the FeedbackTheme enum. */
+export function normalizeFeedbackReview(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const o = raw as Record<string, unknown>;
+  const themeRaw = String(o.theme ?? o.feedback_theme ?? o.category ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[-\s]+/g, "_");
+
+  let theme = themeRaw;
+  if (!FEEDBACK_THEMES.has(theme)) {
+    if (
+      /senior|overqualified|too_high|above_level|staff_level|principal/.test(
+        themeRaw
+      )
+    ) {
+      theme = "too_senior";
+    } else if (
+      /junior|underqualified|too_low|entry|below_level|internship/.test(
+        themeRaw
+      )
+    ) {
+      theme = "too_junior";
+    } else if (
+      /craft|skill|domain|role_type|unfamiliar|consulting|industry|sector|function|title_mismatch|wrong_role|not_my_field/.test(
+        themeRaw
+      )
+    ) {
+      theme = "wrong_craft";
+    } else if (
+      /location|commute|remote|onsite|hybrid|distance|travel|reloc/.test(
+        themeRaw
+      )
+    ) {
+      theme = "location_commute";
+    } else if (
+      /comp|salary|pay|money|wage|benefits|compensation/.test(themeRaw)
+    ) {
+      theme = "compensation";
+    } else if (
+      /company|stage|startup|scaleup|enterprise|size|culture/.test(themeRaw)
+    ) {
+      theme = "company_stage";
+    } else if (
+      /schedule|shift|night|hours|part.?time|full.?time|weekend/.test(themeRaw)
+    ) {
+      theme = "schedule_type";
+    } else {
+      theme = "other";
+    }
+  }
+
+  const stanceRaw = String(o.aiStance ?? o.ai_stance ?? o.stance ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[-\s]+/g, "_");
+  let aiStance = stanceRaw;
+  if (aiStance === "pushback" || aiStance === "disagree") {
+    aiStance = "soft_pushback";
+  } else if (
+    aiStance !== "agree" &&
+    aiStance !== "soft_pushback" &&
+    aiStance !== "strong_pushback"
+  ) {
+    aiStance = "soft_pushback";
+  }
+
+  return {
+    ...o,
+    theme,
+    aiStance,
+    aiExplanation: String(o.aiExplanation ?? o.ai_explanation ?? "").trim(),
+    constraintSummary: String(
+      o.constraintSummary ?? o.constraint_summary ?? ""
+    ).trim(),
+    userLikelyCorrect: Boolean(
+      o.userLikelyCorrect ?? o.user_likely_correct ?? false
+    ),
+    ...(ceilingCleaned()),
+  };
+
+  function ceilingCleaned(): { proposedExperienceCeiling?: string } {
+    const ceiling =
+      o.proposedExperienceCeiling ?? o.proposed_experience_ceiling;
+    if (
+      ceiling == null ||
+      ceiling === "" ||
+      ceiling === "null" ||
+      ceiling === "none"
+    ) {
+      return {};
+    }
+    return { proposedExperienceCeiling: String(ceiling) };
+  }
+}
+
+/** Drop null/empty experienceCeiling before Zod (Gemini often sends null). */
+export function normalizeFeedbackResynth(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const o = { ...(raw as Record<string, unknown>) };
+  const ceiling = o.experienceCeiling ?? o.experience_ceiling;
+  if (
+    ceiling == null ||
+    ceiling === "" ||
+    ceiling === "null" ||
+    ceiling === "none" ||
+    ceiling === "undefined"
+  ) {
+    delete o.experienceCeiling;
+    delete o.experience_ceiling;
+  } else {
+    o.experienceCeiling = ceiling;
+  }
+  if (Array.isArray(o.learnedConstraints)) {
+    o.learnedConstraints = o.learnedConstraints
+      .map((c) => String(c ?? "").trim())
+      .filter(Boolean);
+  } else if (Array.isArray(o.learned_constraints)) {
+    o.learnedConstraints = o.learned_constraints
+      .map((c) => String(c ?? "").trim())
+      .filter(Boolean);
+  }
+  if (typeof o.guidanceSummary !== "string" && typeof o.guidance_summary === "string") {
+    o.guidanceSummary = o.guidance_summary;
+  }
+  return o;
+}

@@ -4,9 +4,15 @@ import {
   getPortfolioSites,
   getCandidateProfile,
   getLinkedInProfile,
+  getFeedbackPreferenceState,
 } from "@/services/firestore";
 import { getPrimaryCountry } from "@/lib/job-search/countries";
 import { formatCommuteForPrompt } from "@/lib/commute/helpers";
+import {
+  formatWorkPreferences,
+  normalizeWorkPreferences,
+} from "@/lib/job-search/work-preference";
+import { formatFeedbackPreferencesForPrompt } from "@/agents/tools/job-feedback";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { ResumeData, PortfolioSite } from "@/lib/types";
 
@@ -22,18 +28,24 @@ const EMPTY_EXTRACTED: ResumeData["extracted"] = {
 export async function buildCandidateContext(
   userId: string
 ): Promise<CandidateContext> {
-  const [profile, resume, portfolioSites, structuredProfile, linkedInProfile] =
+  const [profile, resume, portfolioSites, structuredProfile, linkedInProfile, feedbackPreferences] =
     await Promise.all([
       getProfile(userId),
       getResume(userId),
       getPortfolioSites(userId),
       getCandidateProfile(userId),
       getLinkedInProfile(userId),
+      getFeedbackPreferenceState(userId),
     ]);
 
   if (!profile) {
     throw new Error("Profile not found");
   }
+
+  const normalizedProfile = {
+    ...profile,
+    workPreferences: normalizeWorkPreferences(profile),
+  };
 
   const resumeRawText = resume?.rawText?.trim() ?? "";
   const portfolioRawText = portfolioSites
@@ -41,7 +53,7 @@ export async function buildCandidateContext(
     .map((p) => `URL: ${p.url}\nTitle: ${p.title}\n${p.text}`)
     .join("\n\n---\n\n");
 
-  const coverLetterSamplesText = (profile.coverLetters ?? [])
+  const coverLetterSamplesText = (normalizedProfile.coverLetters ?? [])
     .map((c, i) => {
       const body = c.rawText?.trim();
       if (!body) return null;
@@ -55,7 +67,7 @@ export async function buildCandidateContext(
 
   return {
     userId,
-    profile,
+    profile: normalizedProfile,
     resumeRawText,
     portfolioRawText,
     coverLetterSamplesText,
@@ -64,6 +76,7 @@ export async function buildCandidateContext(
     resumeStructured: resume?.extracted ?? null,
     portfolioStructured,
     structuredProfile,
+    feedbackPreferences,
     hasRawSources:
       resumeRawText.length > 0 ||
       portfolioRawText.length > 0 ||
@@ -122,7 +135,7 @@ export function formatContextForPrompt(ctx: CandidateContext, maxChars = 20000):
     ctx.profile.linkedInUrl ? `LinkedIn: ${ctx.profile.linkedInUrl}` : "",
     ctx.profile.githubUrl ? `GitHub: ${ctx.profile.githubUrl}` : "",
     `Preferred country: ${getPrimaryCountry(ctx.profile.preferredCountries) ?? "not set"}`,
-    `Work preference: ${ctx.profile.workPreference}`,
+    `Work preference: ${formatWorkPreferences(normalizeWorkPreferences(ctx.profile))}`,
     (ctx.profile.languagesSpoken ?? []).length > 0
       ? `Languages spoken: ${(ctx.profile.languagesSpoken ?? []).join(", ")}`
       : "Languages spoken: (not set — treat unknown; fail jobs that clearly require a specific language beyond optional English)",
@@ -130,6 +143,7 @@ export function formatContextForPrompt(ctx: CandidateContext, maxChars = 20000):
       ? `Job preferences: ${ctx.profile.jobPreferences.trim()}`
       : "",
     formatCommuteForPrompt(ctx.profile),
+    formatFeedbackPreferencesForPrompt(ctx.feedbackPreferences),
     "",
     "=== RESUME (source of truth) ===",
     ctx.resumeRawText || "(no resume text)",

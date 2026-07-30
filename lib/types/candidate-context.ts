@@ -1,4 +1,10 @@
-import type { UserProfile, CandidateProfile, ResumeData, PortfolioSite } from "@/lib/types";
+import type {
+  UserProfile,
+  CandidateProfile,
+  ResumeData,
+  PortfolioSite,
+  FeedbackPreferenceState,
+} from "@/lib/types";
 import type { LinkedInProfileData } from "@/lib/types/integrations";
 
 /** Raw sources + optional structured cache — source of truth for AI agents. */
@@ -15,5 +21,7 @@ export interface CandidateContext {
   resumeStructured: ResumeData["extracted"] | null;
   portfolioStructured: PortfolioSite["extracted"] | null;
   structuredProfile: CandidateProfile | null;
+  /** AI-learned constraints from listing feedback ("Teach Career OS"). */
+  feedbackPreferences: FeedbackPreferenceState | null;
   hasRawSources: boolean;
 }
