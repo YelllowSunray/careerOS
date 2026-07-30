@@ -40,3 +40,13 @@ export async function getSignedDownloadUrl(path: string): Promise<string> {
   });
   return url;
 }
+
+/** Best-effort delete — ignores missing files. */
+export async function deleteBuffer(path: string): Promise<void> {
+  try {
+    const bucket = getAdminStorage().bucket();
+    await bucket.file(path).delete({ ignoreNotFound: true });
+  } catch (e) {
+    console.warn("[Storage] Failed to delete", path, e);
+  }
+}

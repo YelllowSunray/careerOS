@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     "firebase-admin",
     "@google-cloud/firestore",
     "pdf-parse",
+    "@napi-rs/canvas",
     "playwright",
     "playwright-core",
     "mammoth",

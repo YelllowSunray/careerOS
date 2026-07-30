@@ -27,6 +27,8 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
+  const [deletingResume, setDeletingResume] = useState(false);
   const [uploadingCoverLetter, setUploadingCoverLetter] = useState(false);
   const [deletingCoverLetterId, setDeletingCoverLetterId] = useState<string | null>(null);
 
@@ -139,6 +141,61 @@ export default function ProfilePage() {
       body: JSON.stringify(update),
     });
     setProfile(updated);
+  }
+
+  async function handleResumeUpload(file: File | null) {
+    if (!file) return;
+    if (!isAllowedResumeFile(file.name)) {
+      alert(`Please upload a ${resumeFileTypeLabel()}.`);
+      return;
+    }
+
+    setUploadingResume(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      await apiFetch("/api/resume/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await apiFetch("/api/profile/process", {
+        method: "POST",
+        body: JSON.stringify({ force: true }),
+      });
+      if (result?.workflow) logWorkflowToConsole(result.workflow, "Resume upload");
+
+      setResume(null);
+      setCandidate(null);
+      await loadData();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to upload resume");
+    } finally {
+      setUploadingResume(false);
+    }
+  }
+
+  async function handleDeleteResume() {
+    if (!profile?.resume) return;
+    if (
+      !confirm(
+        "Remove your resume? AI skills, ladder, and extracted profile data will be cleared until you upload a new CV."
+      )
+    ) {
+      return;
+    }
+
+    setDeletingResume(true);
+    try {
+      await apiFetch("/api/resume/upload", { method: "DELETE" });
+      setResume(null);
+      setCandidate(null);
+      await loadData();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to delete resume");
+    } finally {
+      setDeletingResume(false);
+    }
   }
 
   async function handleCoverLetterUpload(file: File | null) {
@@ -396,25 +453,79 @@ export default function ProfilePage() {
 
         <Card>
           <CardTitle>Resume</CardTitle>
+          <p className="mt-1 text-sm text-zinc-500">
+            Upload a new version anytime — AI will re-extract skills and your career ladder.
+          </p>
           {profile.resume ? (
-            <div className="mt-4 flex items-start gap-3">
-              <FileText className="mt-0.5 h-5 w-5 text-zinc-400" />
-              <div className="text-sm">
-                <p className="font-medium">{profile.resume.fileName}</p>
-                <p className="text-zinc-500">
-                  Uploaded {new Date(profile.resume.uploadedAt).toLocaleDateString()}
-                </p>
-                {hasRawResume && (
-                  <p className="mt-1 text-emerald-600">Resume text ingested</p>
-                )}
-                {candidate && (
-                  <p className="text-violet-600">AI summary available</p>
-                )}
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <FileText className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
+                <div className="text-sm">
+                  <p className="font-medium">{profile.resume.fileName}</p>
+                  <p className="text-zinc-500">
+                    Uploaded {new Date(profile.resume.uploadedAt).toLocaleDateString()}
+                  </p>
+                  {hasRawResume && (
+                    <p className="mt-1 text-emerald-600">Resume text ingested</p>
+                  )}
+                  {candidate && (
+                    <p className="text-violet-600">AI summary available</p>
+                  )}
+                </div>
               </div>
+              <Button
+                variant="ghost"
+                className="shrink-0 self-start px-2 text-zinc-500 hover:text-red-600"
+                disabled={deletingResume || uploadingResume || isProcessing}
+                onClick={() => void handleDeleteResume()}
+                aria-label="Remove resume"
+              >
+                {deletingResume ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </Button>
             </div>
           ) : (
             <p className="mt-4 text-sm text-zinc-500">No resume uploaded</p>
           )}
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <label className="inline-flex cursor-pointer">
+              <input
+                type="file"
+                className="hidden"
+                accept={RESUME_ACCEPT}
+                disabled={uploadingResume || deletingResume || isProcessing}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  e.target.value = "";
+                  void handleResumeUpload(file);
+                }}
+              />
+              <span
+                className={`inline-flex items-center rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium transition-colors ${
+                  uploadingResume || deletingResume || isProcessing
+                    ? "cursor-not-allowed opacity-50"
+                    : "hover:bg-zinc-50"
+                }`}
+              >
+                {uploadingResume ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                {uploadingResume
+                  ? "Uploading…"
+                  : profile.resume
+                    ? "Replace resume"
+                    : "Upload resume"}
+              </span>
+            </label>
+            <p className="text-xs text-zinc-400">{resumeFileTypeLabel()}</p>
+          </div>
+
           {profile.linkedInUrl && (
             <div className="mt-4 border-t border-zinc-100 pt-4 text-sm">
               <p className="font-medium text-zinc-800">LinkedIn profile</p>

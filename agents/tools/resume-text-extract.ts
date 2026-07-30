@@ -1,13 +1,16 @@
 import mammoth from "mammoth";
 import WordExtractor from "word-extractor";
-import { PDFParse } from "pdf-parse";
 import { downloadBuffer } from "@/services/storage";
 import { getResumeExtension, getResumeMimeType } from "@/lib/resume/files";
 import { generateText } from "@/lib/gemini/client";
 import { generateTextFromDocument } from "@/lib/gemini/document";
+import { applyPdfJsNodePolyfills } from "@/lib/pdf/node-polyfills";
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: buffer });
+  applyPdfJsNodePolyfills();
+  const { CanvasFactory } = await import("pdf-parse/worker");
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: buffer, CanvasFactory });
   try {
     const result = await parser.getText();
     return result.text;

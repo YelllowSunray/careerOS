@@ -55,6 +55,14 @@ export async function getResume(userId: string): Promise<ResumeData | null> {
   return snap.exists ? (snap.data() as ResumeData) : null;
 }
 
+export async function deleteResume(userId: string): Promise<void> {
+  await db().collection(COLLECTIONS.resumes).doc(userId).delete();
+}
+
+export async function deleteCandidateProfile(userId: string): Promise<void> {
+  await db().collection(COLLECTIONS.candidateProfiles).doc(userId).delete();
+}
+
 export async function savePortfolioSite(site: PortfolioSite): Promise<void> {
   await setDoc(COLLECTIONS.portfolioSites, site.id, site);
 }
