@@ -4,7 +4,8 @@ import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 
-const PUBLIC_PATHS = ["/login", "/signup"];
+const PUBLIC_PATHS = new Set(["/", "/login", "/signup"]);
+const AUTH_ONLY_PUBLIC = new Set(["/login", "/signup"]);
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -13,10 +14,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (loading) return;
-    if (!user && !PUBLIC_PATHS.includes(pathname)) {
+    if (!user && !PUBLIC_PATHS.has(pathname)) {
       router.replace("/login");
     }
-    if (user && PUBLIC_PATHS.includes(pathname)) {
+    if (user && (AUTH_ONLY_PUBLIC.has(pathname) || pathname === "/")) {
       router.replace("/profile");
     }
   }, [user, loading, pathname, router]);
@@ -29,6 +30,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user && !PUBLIC_PATHS.includes(pathname)) return null;
+  if (!user && !PUBLIC_PATHS.has(pathname)) return null;
   return <>{children}</>;
 }

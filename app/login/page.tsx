@@ -90,6 +90,10 @@ export default function LoginPage() {
           <Link href="/signup" className="font-medium text-zinc-900">
             Sign up
           </Link>
+          {" · "}
+          <Link href="/" className="font-medium text-zinc-900">
+            About Career OS
+          </Link>
         </p>
       </Card>
     </div>

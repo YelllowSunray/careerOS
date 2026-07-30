@@ -231,24 +231,84 @@ export function normalizeJobListings(raw: unknown): unknown {
 function coerceMissingSkills(
   value: unknown,
   fallbackStrings: string[] = []
-): { skill: string; isHardRequirement: boolean }[] {
+): {
+  skill: string;
+  learnability: "must_have" | "learn_on_job" | "nice_to_have";
+  isHardRequirement: boolean;
+}[] {
+  const normalizeLearnability = (
+    raw: unknown,
+    hardFallback?: boolean
+  ): "must_have" | "learn_on_job" | "nice_to_have" => {
+    const s = String(raw ?? "")
+      .toLowerCase()
+      .trim()
+      .replace(/[-\s]+/g, "_");
+    if (
+      s === "must_have" ||
+      s === "musthave" ||
+      s === "hard" ||
+      s === "required" ||
+      s === "non_negotiable"
+    ) {
+      return "must_have";
+    }
+    if (
+      s === "learn_on_job" ||
+      s === "learn_on_the_job" ||
+      s === "learnable" ||
+      s === "ramp" ||
+      s === "trainable"
+    ) {
+      return "learn_on_job";
+    }
+    if (
+      s === "nice_to_have" ||
+      s === "nicetohave" ||
+      s === "soft" ||
+      s === "preferred" ||
+      s === "optional"
+    ) {
+      return "nice_to_have";
+    }
+    if (hardFallback === true) return "must_have";
+    if (hardFallback === false) return "nice_to_have";
+    return "nice_to_have";
+  };
+
   if (Array.isArray(value)) {
     const parsed = value
       .map((item) => {
         if (typeof item === "string") {
-          return { skill: item.trim(), isHardRequirement: false };
+          return {
+            skill: item.trim(),
+            learnability: "nice_to_have" as const,
+            isHardRequirement: false,
+          };
         }
         const o = (item ?? {}) as Record<string, unknown>;
         const skill = String(o.skill ?? o.name ?? o.requirement ?? "").trim();
         if (!skill) return null;
+        const hardFlag = o.isHardRequirement ?? o.required ?? o.is_required ?? o.hard;
+        const learnability = normalizeLearnability(
+          o.learnability ?? o.gapType ?? o.gap_type ?? o.category,
+          typeof hardFlag === "boolean" ? hardFlag : undefined
+        );
         return {
           skill,
-          isHardRequirement: Boolean(
-            o.isHardRequirement ?? o.required ?? o.is_required ?? o.hard
-          ),
+          learnability,
+          isHardRequirement: learnability === "must_have",
         };
       })
-      .filter((x): x is { skill: string; isHardRequirement: boolean } => !!x);
+      .filter(
+        (
+          x
+        ): x is {
+          skill: string;
+          learnability: "must_have" | "learn_on_job" | "nice_to_have";
+          isHardRequirement: boolean;
+        } => !!x
+      );
     if (parsed.length > 0) return parsed;
   }
 
@@ -256,6 +316,7 @@ function coerceMissingSkills(
   const combined = [...strings, ...fallbackStrings].filter(Boolean);
   return [...new Set(combined)].map((skill) => ({
     skill,
+    learnability: "nice_to_have" as const,
     isHardRequirement: false,
   }));
 }
@@ -397,20 +458,89 @@ export function normalizeJobMatch(raw: unknown): unknown {
     const s = skillRequirementMet.toLowerCase().trim();
     skillRequirementMet = s === "true" || s === "yes" || s === "met";
   }
+
+  const coreCraftRaw = String(
+    o.coreCraftFit ?? o.core_craft_fit ?? o.craftFit ?? o.craft_fit ?? ""
+  )
+    .toLowerCase()
+    .trim()
+    .replace(/[-\s]+/g, "_");
+  let coreCraftFit: "day_one" | "with_ramp" | "not_eligible" | undefined;
+  if (
+    coreCraftRaw === "day_one" ||
+    coreCraftRaw === "dayone" ||
+    coreCraftRaw === "ready"
+  ) {
+    coreCraftFit = "day_one";
+  } else if (
+    coreCraftRaw === "with_ramp" ||
+    coreCraftRaw === "withramp" ||
+    coreCraftRaw === "ramp" ||
+    coreCraftRaw === "learn_on_job" ||
+    coreCraftRaw === "trainable"
+  ) {
+    coreCraftFit = "with_ramp";
+  } else if (
+    coreCraftRaw === "not_eligible" ||
+    coreCraftRaw === "noteligible" ||
+    coreCraftRaw === "wrong_craft" ||
+    coreCraftRaw === "ineligible"
+  ) {
+    coreCraftFit = "not_eligible";
+  }
+
   if (typeof skillRequirementMet !== "boolean") {
-    // Infer fail only when model already flagged hard missing skills.
-    const hardMissing = Array.isArray(missingSkills)
-      ? missingSkills.some(
-          (s) =>
-            s &&
-            typeof s === "object" &&
-            Boolean((s as { isHardRequirement?: boolean }).isHardRequirement)
-        )
-      : false;
-    skillRequirementMet = !hardMissing;
+    if (coreCraftFit) {
+      skillRequirementMet = coreCraftFit !== "not_eligible";
+    } else {
+      // Infer fail only when model flagged must-have / hard missing skills.
+      const hardMissing = Array.isArray(missingSkills)
+        ? missingSkills.some((s) => {
+            if (!s || typeof s !== "object") return false;
+            const m = s as {
+              learnability?: string;
+              isHardRequirement?: boolean;
+            };
+            if (m.learnability === "must_have") return true;
+            if (
+              m.learnability === "learn_on_job" ||
+              m.learnability === "nice_to_have"
+            ) {
+              return false;
+            }
+            return Boolean(m.isHardRequirement);
+          })
+        : false;
+      skillRequirementMet = !hardMissing;
+    }
+  }
+
+  if (!coreCraftFit) {
+    coreCraftFit = skillRequirementMet ? "with_ramp" : "not_eligible";
+  } else {
+    skillRequirementMet = coreCraftFit !== "not_eligible";
   }
 
   const skillNotes = String(o.skillNotes ?? o.skill_notes ?? "").trim();
+
+  let commuteRequirementMet =
+    o.commuteRequirementMet ?? o.commute_requirement_met;
+  if (typeof commuteRequirementMet === "string") {
+    const s = commuteRequirementMet.toLowerCase().trim();
+    commuteRequirementMet = s === "true" || s === "yes" || s === "met";
+  }
+  if (typeof commuteRequirementMet !== "boolean") {
+    commuteRequirementMet = true;
+  }
+
+  const commuteNotes = String(o.commuteNotes ?? o.commute_notes ?? "").trim();
+  const estimatedCommuteMinutesRaw =
+    o.estimatedCommuteMinutes ?? o.estimated_commute_minutes;
+  const estimatedCommuteMinutes =
+    typeof estimatedCommuteMinutesRaw === "number" &&
+    Number.isFinite(estimatedCommuteMinutesRaw)
+      ? Math.round(estimatedCommuteMinutesRaw)
+      : undefined;
 
   const scopeIncrease = scoreOrUndef(
     o.scopeIncrease ?? o.scope_increase ?? details?.scopeIncrease
@@ -450,8 +580,14 @@ export function normalizeJobMatch(raw: unknown): unknown {
     requiredLanguages,
     languageRequirementMet,
     languageNotes,
+    coreCraftFit,
     skillRequirementMet,
     skillNotes,
+    commuteRequirementMet,
+    commuteNotes,
+    ...(estimatedCommuteMinutes !== undefined
+      ? { estimatedCommuteMinutes }
+      : {}),
     scopeIncrease: scopeIncrease ?? 40,
     scopeNotes,
     pathType,
@@ -674,7 +810,7 @@ export function normalizeRelevanceBatch(raw: unknown): unknown {
         relevant = s === "true" || s === "yes" || s === "relevant";
       }
       if (typeof relevant !== "boolean") {
-        relevant = score >= 55;
+        relevant = score >= 40;
       }
       return {
         index: coerceNumber(
@@ -721,11 +857,77 @@ export function normalizeTailoredSearchPlan(raw: unknown): unknown {
     : raw && typeof raw === "object"
       ? (raw as Record<string, unknown>)
       : {};
-  const queries =
+
+  const queriesRaw =
     o.searchQueries ?? o.search_queries ?? o.queries ?? o.query;
+
+  let searchQueries: { query: string; language: string }[] = [];
+  if (Array.isArray(queriesRaw)) {
+    if (
+      queriesRaw.length > 0 &&
+      queriesRaw[0] &&
+      typeof queriesRaw[0] === "object"
+    ) {
+      searchQueries = queriesRaw
+        .map((item) => {
+          const r = item as Record<string, unknown>;
+          const query = String(r.query ?? r.keyword ?? r.text ?? "").trim();
+          const lang = String(r.language ?? r.lang ?? "en")
+            .toLowerCase()
+            .startsWith("nl")
+            ? "nl"
+            : "en";
+          const intentRaw = String(r.intent ?? r.kind ?? r.type ?? "")
+            .toLowerCase()
+            .trim();
+          const intent =
+            intentRaw === "stretch" || intentRaw === "ambitious"
+              ? "stretch"
+              : intentRaw === "next" || intentRaw === "near" || intentRaw === "hireable"
+                ? "next"
+                : undefined;
+          return query
+            ? intent
+              ? { query, language: lang, intent }
+              : { query, language: lang }
+            : null;
+        })
+        .filter(Boolean) as {
+        query: string;
+        language: string;
+        intent?: string;
+      }[];
+    } else {
+      searchQueries = coerceStringArray(queriesRaw).map((query) => ({
+        query,
+        language: "en",
+      }));
+    }
+  }
+
+  const strategyRaw = String(
+    o.searchLanguageStrategy ?? o.search_language_strategy ?? "single"
+  )
+    .toLowerCase()
+    .trim();
+  const searchLanguageStrategy =
+    strategyRaw === "mixed" ? "mixed" : "single";
+
+  const primaryRaw = String(
+    o.primarySearchLanguage ?? o.primary_search_language ?? "en"
+  )
+    .toLowerCase()
+    .trim();
+  const primarySearchLanguage = primaryRaw.startsWith("nl") ? "nl" : "en";
+
+  const languageRationale = String(
+    o.languageRationale ?? o.language_rationale ?? ""
+  ).trim();
+
   const rationale = String(
     o.rationale ?? o.reason ?? o.explanation ?? o.search_rationale ?? ""
   ).trim();
+
   return {
     inferredExperienceLevel: coerceExperienceLevel(
       o.inferredExperienceLevel ??
@@ -733,7 +935,142 @@ export function normalizeTailoredSearchPlan(raw: unknown): unknown {
         o.experienceLevel ??
         o.experience_level
     ),
-    searchQueries: coerceStringArray(queries),
+    searchLanguageStrategy,
+    primarySearchLanguage,
+    searchQueries,
+    languageRationale,
     rationale: rationale || "AI-tailored search plan",
   };
 }
+
+/** Gemini education / certification recommendation plans. */
+export function normalizeEducationRecommendations(raw: unknown): unknown {
+  const o = Array.isArray(raw)
+    ? ((raw[0] ?? {}) as Record<string, unknown>)
+    : raw && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+
+  const summary = String(
+    o.summary ?? o.strategy ?? o.educationStrategy ?? o.education_strategy ?? ""
+  ).trim();
+
+  const listRaw =
+    o.recommendations ??
+    o.educationRecommendations ??
+    o.education_recommendations ??
+    o.certs ??
+    o.items ??
+    [];
+
+  const normalizeType = (v: unknown): string => {
+    const s = String(v ?? "")
+      .toLowerCase()
+      .trim();
+    if (s.includes("licen")) return "license";
+    if (s.includes("degree") || s.includes("bachelor") || s.includes("master"))
+      return "degree";
+    if (s.includes("course") || s.includes("class")) return "course";
+    if (s.includes("train")) return "training";
+    return "certification";
+  };
+
+  const normalizeHorizon = (v: unknown): string => {
+    const s = String(v ?? "")
+      .toLowerCase()
+      .trim();
+    if (s.includes("stretch") || s.includes("long") || s.includes("later"))
+      return "stretch";
+    return "near";
+  };
+
+  const normalizeSources = (v: unknown): string[] => {
+    const arr = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
+    const out: string[] = [];
+    for (const item of arr) {
+      const s = String(item)
+        .toLowerCase()
+        .trim();
+      if (s.includes("market") || s.includes("job")) out.push("market");
+      else if (s.includes("ladder") || s.includes("career")) out.push("ladder");
+      else if (s.includes("profile") || s.includes("cv") || s.includes("resume"))
+        out.push("profile");
+      else if (s.includes("knowledge") || s.includes("domain") || s.includes("industry"))
+        out.push("knowledge");
+    }
+    return [...new Set(out.length ? out : ["knowledge"])];
+  };
+
+  const recommendations = (Array.isArray(listRaw) ? listRaw : [])
+    .map((item, i) => {
+      if (typeof item === "string") {
+        return {
+          title: item.trim(),
+          type: "certification",
+          rationale: "Suggested next credential for ladder climb.",
+          closesGaps: [],
+          targetsLadderRoles: [],
+          priority: i + 1,
+          horizon: "near",
+          evidenceSources: ["knowledge"],
+        };
+      }
+      if (!item || typeof item !== "object") return null;
+      const r = item as Record<string, unknown>;
+      const title = String(
+        r.title ?? r.name ?? r.certification ?? r.credential ?? ""
+      ).trim();
+      if (!title) return null;
+      const marketSignalCount = r.marketSignalCount ?? r.market_signal_count;
+      return {
+        title,
+        type: normalizeType(r.type ?? r.kind ?? r.category),
+        provider: String(r.provider ?? r.issuer ?? r.organization ?? "").trim() ||
+          undefined,
+        rationale: String(
+          r.rationale ?? r.reason ?? r.why ?? r.explanation ?? ""
+        ).trim() || "Helps unlock the next ladder move.",
+        closesGaps: coerceStringArray(
+          r.closesGaps ?? r.closes_gaps ?? r.gaps ?? r.skills
+        ),
+        targetsLadderRoles: coerceStringArray(
+          r.targetsLadderRoles ??
+            r.targets_ladder_roles ??
+            r.roles ??
+            r.targetRoles
+        ),
+        priority: coerceNumber(r.priority ?? r.rank ?? i + 1, i + 1),
+        horizon: normalizeHorizon(r.horizon ?? r.timeHorizon ?? r.time_horizon),
+        evidenceSources: normalizeSources(
+          r.evidenceSources ?? r.evidence_sources ?? r.sources
+        ),
+        ...(typeof marketSignalCount === "number"
+          ? { marketSignalCount: Math.round(marketSignalCount) }
+          : {}),
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    summary:
+      summary ||
+      "Prioritize credentials that unlock hireable next roles on your ladder.",
+    recommendations:
+      recommendations.length > 0
+        ? recommendations
+        : [
+            {
+              title: "Role-relevant short course",
+              type: "course",
+              rationale:
+                "Build a targeted credential that closes the most common gaps on your ladder.",
+              closesGaps: [],
+              targetsLadderRoles: [],
+              priority: 1,
+              horizon: "near",
+              evidenceSources: ["knowledge"],
+            },
+          ],
+  };
+}
+

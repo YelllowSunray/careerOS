@@ -4,13 +4,33 @@ import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/hooks/use-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import type { Job, JobMatch, Workflow, Application, CoverLetterLanguage } from "@/lib/types";
+import type {
+  CandidateProfile,
+  EducationRecommendation,
+  Job,
+  JobMatch,
+  UserProfile,
+  Workflow,
+  Application,
+  CoverLetterLanguage,
+} from "@/lib/types";
+import type { JobSearchLanguageSetting } from "@/lib/job-search/locale";
+import {
+  detectListingLanguage,
+  formatSearchLanguageStrategyLabel,
+  listingLanguageLabel,
+} from "@/lib/job-search/locale";
 import type { AiUsageRecord } from "@/lib/types/ai-usage";
 import { getCategoryTotals } from "@/lib/ai-usage/categories";
 import { isWorkflowActive, isWorkflowPaused } from "@/lib/workflows/stale";
 import { StatusBadge } from "@/components/ui/badge";
 import { Copy, FileText, Loader2, Pause, Sparkles, Trash2 } from "lucide-react";
-import { isSkillIneligible } from "@/lib/job-search/hard-requirements";
+import { isCommuteIneligible, isSkillIneligible, groupMissingSkillsByLearnability } from "@/lib/job-search/hard-requirements";
+import {
+  evidenceLabel,
+  recommendationsForMatchGaps,
+} from "@/lib/education/helpers";
+import { formatCommuteMatchLine } from "@/lib/commute/helpers";
 
 function formatJobSource(job: Job): string {
   const labels: Record<string, string> = {
@@ -53,6 +73,24 @@ function activeStepLabel(workflow: Workflow | null): string {
   return "Searching…";
 }
 
+function searchPlanFromWorkflow(workflow: Workflow | null): {
+  languageStrategy?: string;
+  language?: string;
+  queryPlans?: { query?: string; language?: string }[];
+  languageRationale?: string;
+  rationale?: string;
+} | null {
+  const raw = workflow?.config?.searchPlan;
+  if (!raw || typeof raw !== "object") return null;
+  return raw as {
+    languageStrategy?: string;
+    language?: string;
+    queryPlans?: { query?: string; language?: string }[];
+    languageRationale?: string;
+    rationale?: string;
+  };
+}
+
 export default function JobsPage() {
   const { apiFetch } = useApi();
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -74,16 +112,27 @@ export default function JobsPage() {
     portfolio: boolean;
     linkedin: boolean;
   } | null>(null);
+  const [educationRecs, setEducationRecs] = useState<EducationRecommendation[]>(
+    []
+  );
+  const [educationSummary, setEducationSummary] = useState<string | null>(null);
+  const [commuteProfile, setCommuteProfile] = useState<Pick<
+    UserProfile,
+    "homeLocation" | "commuteMode" | "commuteMaxMinutes"
+  > | null>(null);
+  const [searchLanguage, setSearchLanguage] =
+    useState<JobSearchLanguageSetting>("auto");
 
   const load = useCallback(async () => {
     try {
-      const [j, m, a, u, w, c] = await Promise.all([
+      const [j, m, a, u, w, c, p] = await Promise.all([
         apiFetch("/api/data?type=jobs"),
         apiFetch("/api/data?type=matches"),
         apiFetch("/api/data?type=applications").catch(() => []),
         apiFetch("/api/data?type=ai-usage").catch(() => null),
         apiFetch("/api/workflows/status?type=find_jobs").catch(() => null),
         apiFetch("/api/data?type=candidate").catch(() => null),
+        apiFetch("/api/profile").catch(() => null),
       ]);
       setJobs(j ?? []);
       setMatches(m ?? []);
@@ -97,6 +146,20 @@ export default function JobsPage() {
           portfolio: !!c.sources.portfolio,
           linkedin: !!c.sources.linkedin,
         });
+      }
+      const candidate = c as CandidateProfile | null;
+      setEducationRecs(candidate?.educationRecommendations ?? []);
+      setEducationSummary(candidate?.educationRecommendationsSummary ?? null);
+      const profile = p as UserProfile | null;
+      if (profile) {
+        setCommuteProfile({
+          homeLocation: profile.homeLocation,
+          commuteMode: profile.commuteMode,
+          commuteMaxMinutes: profile.commuteMaxMinutes,
+        });
+      }
+      if (profile?.settings?.jobSearchLanguage) {
+        setSearchLanguage(profile.settings.jobSearchLanguage);
       }
     } catch {
       // Keep existing jobs/matches visible if a poll fails (e.g. during pause).
@@ -183,7 +246,10 @@ export default function JobsPage() {
     setFinding(true);
 
     try {
-      const result = await apiFetch("/api/workflows/find-jobs", { method: "POST" });
+      const result = await apiFetch("/api/workflows/find-jobs", {
+        method: "POST",
+        body: JSON.stringify({ searchLanguage }),
+      });
       setWorkflow(result?.workflow ?? null);
       if (result?.status === "failed") {
         alert(result?.workflow?.error ?? result?.error ?? "Find jobs failed");
@@ -213,7 +279,7 @@ export default function JobsPage() {
   async function handleClearResults() {
     if (
       !confirm(
-        "Delete all job search results (jobs, matches, and applications)? This cannot be undone."
+        "Delete all job search results (jobs, matches, and applications)? The next Find Jobs will re-check listings that were previously rejected or saved. This cannot be undone."
       )
     ) {
       return;
@@ -243,6 +309,7 @@ export default function JobsPage() {
       const match = matchMap.get(job.id);
       if (match?.languageRequirementMet === false) return false;
       if (isSkillIneligible(match)) return false;
+      if (isCommuteIneligible(match)) return false;
       return true;
     })
     .sort((a, b) => {
@@ -274,6 +341,28 @@ export default function JobsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+          <div className="flex w-full flex-col gap-1 sm:w-auto">
+            <label
+              htmlFor="search-language"
+              className="text-xs font-medium text-zinc-500"
+            >
+              Search keywords
+            </label>
+            <select
+              id="search-language"
+              value={searchLanguage}
+              onChange={(e) =>
+                setSearchLanguage(e.target.value as JobSearchLanguageSetting)
+              }
+              disabled={finding}
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm sm:w-auto"
+              title="Language of LinkedIn/Indeed search keywords — not a filter on posting language"
+            >
+              <option value="auto">Auto (AI picks NL / EN / mixed)</option>
+              <option value="en">English keywords</option>
+              <option value="nl">Dutch keywords</option>
+            </select>
+          </div>
           {isDev && (
             <Button
               variant="danger"
@@ -318,12 +407,52 @@ export default function JobsPage() {
       {finding && (
         <div className="flex items-center gap-3 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-800">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-          <div>
+          <div className="min-w-0">
             <p className="font-medium">Searching continuously until you pause…</p>
             <p className="text-violet-600">
               {activeStepLabel(workflow)}
+              {(() => {
+                const plan = searchPlanFromWorkflow(workflow);
+                const strategyLabel = formatSearchLanguageStrategyLabel(plan);
+                if (strategyLabel) {
+                  return <> · {strategyLabel}</>;
+                }
+                if (typeof workflow?.config?.searchLanguage === "string") {
+                  return (
+                    <>
+                      {" "}
+                      ·{" "}
+                      {workflow.config.searchLanguage === "auto"
+                        ? "Auto language"
+                        : `${String(workflow.config.searchLanguage).toUpperCase()} search`}
+                    </>
+                  );
+                }
+                return null;
+              })()}
               {jobs.length > 0 && ` · ${jobs.length} matched so far`}
             </p>
+            {(() => {
+              const plan = searchPlanFromWorkflow(workflow);
+              if (!plan?.queryPlans?.length) return null;
+              const queries = plan.queryPlans
+                .map((p) => {
+                  const q = p.query?.trim();
+                  if (!q) return null;
+                  const lang = p.language === "nl" ? "NL" : "EN";
+                  return `${q} [${lang}]`;
+                })
+                .filter(Boolean);
+              if (queries.length === 0) return null;
+              return (
+                <p className="mt-1 break-words text-xs text-violet-500">
+                  Queries: {queries.join(" · ")}
+                  {plan.languageRationale
+                    ? ` — ${plan.languageRationale}`
+                    : ""}
+                </p>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -336,7 +465,8 @@ export default function JobsPage() {
 
       {isWorkflowPaused(workflow) && !finding && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Job search was paused. Results found before pausing are shown below.
+          Job search was paused. Saved matches stay; previously rejected listings
+          stay skipped when you Find Jobs again. Clear Results to re-open those.
         </div>
       )}
 
@@ -417,6 +547,38 @@ export default function JobsPage() {
         </Card>
       )}
 
+      {educationRecs.length > 0 && (
+        <Card className="border-sky-100 bg-sky-50/40">
+          <CardTitle>Climb faster — next credentials</CardTitle>
+          {educationSummary && (
+            <p className="mt-2 text-sm text-sky-900/80">{educationSummary}</p>
+          )}
+          <ul className="mt-3 space-y-2">
+            {educationRecs.slice(0, 4).map((rec) => (
+              <li key={`${rec.priority}-${rec.title}`} className="text-sm">
+                <span className="font-medium text-sky-950">
+                  #{rec.priority} {rec.title}
+                </span>
+                <span className="ml-2 text-xs uppercase text-sky-700/70">
+                  {rec.type} · {rec.horizon}
+                </span>
+                <p className="text-xs text-sky-900/70">{rec.rationale}</p>
+                <p className="text-[10px] uppercase tracking-wide text-sky-700/50">
+                  {evidenceLabel(rec.evidenceSources)}
+                  {rec.marketSignalCount
+                    ? ` · ${rec.marketSignalCount} jobs`
+                    : ""}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-sky-800/60">
+            Informed by your ladder and requirements from jobs found. Full list on
+            Profile.
+          </p>
+        </Card>
+      )}
+
       {loading && jobs.length === 0 ? (
         <p className="text-zinc-500">Loading jobs...</p>
       ) : jobs.length === 0 && !finding ? (
@@ -446,6 +608,9 @@ export default function JobsPage() {
             const showLetter = !!letter && (expandedLetters[job.id] ?? true);
             const showBrief = !!sources && (expandedBriefs[job.id] ?? false);
             const thinBrief = (sources?.listingTextChars ?? 0) > 0 && (sources?.listingTextChars ?? 0) < 800;
+            const listingLang =
+              job.listingLanguage ??
+              detectListingLanguage(job.title, job.description);
 
             return (
               <Card key={job.id} className={match && match.fitScore < 50 ? "opacity-60" : ""}>
@@ -456,6 +621,16 @@ export default function JobsPage() {
                       <p className="text-sm text-zinc-500">
                         {job.company} · {job.location}
                       </p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          listingLang === "nl"
+                            ? "bg-orange-50 text-orange-800"
+                            : "bg-sky-50 text-sky-800"
+                        }`}
+                        title="Language the job listing is written in"
+                      >
+                        {listingLanguageLabel(listingLang)} listing
+                      </span>
                       {job.applicationUrl ? (
                         <a
                           href={job.applicationUrl}
@@ -476,6 +651,28 @@ export default function JobsPage() {
                         </span>
                       )}
                     </div>
+                    {(() => {
+                      const commuteLine = formatCommuteMatchLine(
+                        match,
+                        commuteProfile
+                      );
+                      if (!commuteLine) return null;
+                      return (
+                        <p
+                          className={`mt-1.5 text-xs ${
+                            commuteLine.tone === "ok"
+                              ? "text-emerald-700"
+                              : commuteLine.tone === "fail"
+                                ? "text-red-700"
+                                : "text-zinc-600"
+                          }`}
+                          title={match?.commuteNotes || undefined}
+                        >
+                          <span className="font-medium">Commute: </span>
+                          {commuteLine.text}
+                        </p>
+                      );
+                    })()}
                   </div>
                   {match ? (
                     <div className="shrink-0 text-right">
@@ -630,14 +827,54 @@ export default function JobsPage() {
                         {match.strengths.join(", ")}
                       </p>
                     )}
-                    {match.missingSkills.length > 0 && (
-                      <p>
-                        <span className="font-medium text-amber-700">Missing: </span>
-                        {match.missingSkills
-                          .map((s) => `${s.skill}${s.isHardRequirement ? " (required)" : ""}`)
-                          .join(", ")}
-                      </p>
-                    )}
+                    {match.missingSkills.length > 0 && (() => {
+                      const { mustHave, learnOnJob, niceToHave } =
+                        groupMissingSkillsByLearnability(match.missingSkills);
+                      return (
+                        <div className="space-y-1">
+                          {mustHave.length > 0 && (
+                            <p>
+                              <span className="font-medium text-red-700">Required now: </span>
+                              {mustHave.map((s) => s.skill).join(", ")}
+                            </p>
+                          )}
+                          {learnOnJob.length > 0 && (
+                            <p>
+                              <span className="font-medium text-sky-700">Can learn on the job: </span>
+                              {learnOnJob.map((s) => s.skill).join(", ")}
+                            </p>
+                          )}
+                          {niceToHave.length > 0 && (
+                            <p>
+                              <span className="font-medium text-amber-700">Nice to have: </span>
+                              {niceToHave.map((s) => s.skill).join(", ")}
+                            </p>
+                          )}
+                          {(learnOnJob.length > 0 && mustHave.length === 0) ||
+                          match.coreCraftFit === "with_ramp" ? (
+                            <span className="inline-block rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
+                              Ramp expected
+                            </span>
+                          ) : null}
+                          {(() => {
+                            const tipRecs = recommendationsForMatchGaps(
+                              educationRecs,
+                              match.missingSkills,
+                              2
+                            );
+                            if (tipRecs.length === 0) return null;
+                            return (
+                              <p className="text-xs text-indigo-800">
+                                <span className="font-medium">Credential tip: </span>
+                                {tipRecs
+                                  .map((r) => r.title)
+                                  .join(" · ")}
+                              </p>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })()}
                     {match.applyRecommendation && (
                       <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
                         Recommended to apply

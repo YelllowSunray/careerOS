@@ -274,10 +274,12 @@ export async function searchLinkedInJobs(
     experienceLevel?: ExperienceLevel;
     /** Pagination offset into LinkedIn results (0, 25, 50, …). */
     start?: number;
+    locale?: string;
   }
 ): Promise<DiscoveredJobListing[]> {
   const location = options?.location ?? "Worldwide";
   const start = Math.max(0, options?.start ?? 0);
+  const locale = options?.locale ?? "en-US";
   logBoardInfo("linkedin", `Search start`, {
     query,
     location,
@@ -293,7 +295,8 @@ export async function searchLinkedInJobs(
       userId,
       options?.experienceLevel,
       start,
-      options?.workPreference ?? "any"
+      options?.workPreference ?? "any",
+      locale
     );
     if (guest.length >= 1) {
       logBoardInfo("linkedin", `Using guest API results`, {
@@ -326,7 +329,7 @@ export async function searchLinkedInJobs(
 
     const browser = await chromium.launch({ headless: true });
     try {
-      const context = await createBrowserContext(browser);
+      const context = await createBrowserContext(browser, locale);
       const page = await context.newPage();
       const scraped = await scrapePageWithAi(
         page,
@@ -490,6 +493,7 @@ export async function searchPlaywrightJobBoards(
     experienceLevel?: ExperienceLevel;
     /** Result offset for pagination across continuous-search rounds. */
     start?: number;
+    locale?: string;
   }
 ): Promise<DiscoveredJobListing[]> {
   const location = resolveLinkedInLocation(
@@ -497,6 +501,7 @@ export async function searchPlaywrightJobBoards(
     profile.workPreference
   );
   const start = Math.max(0, profile.start ?? 0);
+  const locale = profile.locale ?? "en-US";
 
   logBoardInfo("linkedin", `Batch start for "${query}"`, {
     boards,
@@ -516,6 +521,7 @@ export async function searchPlaywrightJobBoards(
           workPreference: profile.workPreference,
           experienceLevel: profile.experienceLevel,
           start,
+          locale,
         })
       )
     );

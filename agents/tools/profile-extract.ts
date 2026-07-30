@@ -159,18 +159,31 @@ Rules:
 - Each project must include links (array, use [] if none) and source ("resume", "portfolio", or "linkedin")
 - experienceLevel must be one of: junior, mid, senior, staff, principal
 - Deduplicate skills, technologies, and projects across sources
-- Infer suitable job roles with confidence 0-100
 - Only use information present in the provided data
 - Treat LinkedIn experience and skills as first-class evidence alongside the resume
 
-CAREER LADDER (required — this drives job search):
-Build an explicit climb map. Do NOT only list title synonyms of their current job.
-- currentRole: their present / most recent role
-- nextRoles: 2–4 plausible NEXT roles (~0–18 months). Mix same-branch step-ups AND adjacent sector/function moves (e.g. Compliance → Risk, AML, Privacy, Regulatory Affairs) when transferable strengths support it
-- stretchRoles: 1–3 roles ~1–2 years out that increase scope further
-- For EVERY ladder role include: transferableStrengths (already have), gapsToClose, whyScopeIncreases (team/stakeholders/decision rights/market/IC→lead — not just a fancier title), searchQuery (2–5 words boards understand)
-- Prefer scope increases and slight sector moves that compound into bigger jumps later
-- At least TWO nextRoles or stretchRoles should be branch="adjacent" when credible
+EXPERIENCE LEVEL (judgment from evidence, not title inflation):
+- Reflect years of ownership, team leadership, budget/P&L, and proven scope — not aspirational titles
+- Recent promotion into first supervisory role after years as hands-on IC → typically mid (or mid leaning senior), NOT staff/principal, and usually NOT full senior unless there is sustained multi-year supervisory/manager evidence
+- "senior" needs clear evidence of broader ownership over time (larger teams, multiple areas, budget, or multi-year lead experience) — a new Magazijnchef / team lead title alone after IC years is usually mid
+
+INFERRED ROLES (hireability, not wish list):
+- List roles an employer would realistically interview them for NOW based on demonstrated craft
+- High confidence (≥80) only when they have done substantially similar work
+- Do NOT invent specialty titles from a different profession unless the CV shows that craft
+- Adjacent is OK when transferable day-to-day work overlaps; adjacent is NOT "jump into a different profession because it sounds like growth"
+
+CAREER LADDER (required — this drives job search keywords):
+Build an honest climb map. Prefer scope step-ups they can actually perform soon.
+- currentRole: present / most recent role
+- nextRoles (2–4, ~0–18 months): roles they could be hired for with current evidence + mild stretch. If gapsToClose would block day-1 delivery of the role's CORE craft (not merely a learnable tool), that title does NOT belong in nextRoles — put it later or drop it
+- stretchRoles (1–3, ~1–2 years): bigger scope that still sits on the SAME craft ladder. Stretch is "bigger version of what they do", not "new profession that needs a specialty craft they never practiced"
+- Tools/systems they can ramp on while doing the same craft may appear in gapsToClose — that is fine for nextRoles. Unsupported specialty crafts must not.
+- For EVERY ladder role: transferableStrengths, gapsToClose, whyScopeIncreases (team/stakeholders/decision rights — not a fancier title alone), searchQuery (2–5 words boards understand; Dutch phrases when the resume is Dutch)
+- searchQuery MUST be a title an employer would hire THEM for with current evidence (or mild stretch). One short phrase preferred — avoid stuffing unrelated specialties into searchQuery
+- Prefer same-branch bigger scope first; adjacent only when day-to-day duties clearly transfer
+- Do NOT require a fixed quota of adjacent roles if adjacent would invent unsupported specialty careers
+- Summary must acknowledge what they cannot yet lead without pretending those are near-term destinations
 
 Return JSON matching this exact shape:
 ${CANDIDATE_JSON_SHAPE}

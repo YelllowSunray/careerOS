@@ -9,12 +9,40 @@ import {
 } from "@/lib/candidate/context";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { ExperienceLevel } from "@/lib/types";
+import {
+  genericFallbackQueries,
+  guessQueryLanguage,
+  resolveJobSearchLanguage,
+  searchLanguageAutoDecisionBlock,
+  searchLanguageLockedBlock,
+  type JobSearchLanguageSetting,
+  type ResolvedJobSearchLanguage,
+  type SearchLanguageStrategy,
+  type SearchQueryPlan,
+} from "@/lib/job-search/locale";
+
+export type { SearchQueryPlan, SearchLanguageStrategy };
 
 export interface TailoredSearchPlan {
+  /** Flat query strings for backward compatibility */
   queries: string[];
+  /** Per-query language tags chosen by AI */
+  queryPlans: SearchQueryPlan[];
   inferredLevel: ExperienceLevel;
   rationale: string;
+  /** Why single vs mixed (AI) */
+  languageRationale: string;
+  languageStrategy: SearchLanguageStrategy;
+  /** Dominant query language */
+  language: ResolvedJobSearchLanguage;
 }
+
+const searchQueryItemSchema = z.object({
+  query: z.string(),
+  language: z.enum(["nl", "en"]),
+  /** next = hireable-now ladder destination; stretch = bigger same-craft scope */
+  intent: z.enum(["next", "stretch"]).optional(),
+});
 
 const tailoredSearchSchema = z.object({
   inferredExperienceLevel: z.enum([
@@ -24,7 +52,10 @@ const tailoredSearchSchema = z.object({
     "staff",
     "principal",
   ]),
-  searchQueries: z.array(z.string()).min(1).max(4),
+  searchLanguageStrategy: z.enum(["single", "mixed"]),
+  primarySearchLanguage: z.enum(["nl", "en"]),
+  searchQueries: z.array(searchQueryItemSchema).min(2).max(4),
+  languageRationale: z.string(),
   rationale: z.string(),
 });
 
@@ -39,7 +70,6 @@ const LEVEL_MODIFIERS: Record<
   principal: { prefixed: ["principal", "staff"], fallback: "senior" },
 };
 
-/** Strip level words so we can re-apply the right modifier for search. */
 function normalizeRoleTitle(title: string): string {
   return title
     .toLowerCase()
@@ -51,7 +81,6 @@ function normalizeRoleTitle(title: string): string {
     .trim();
 }
 
-/** Heuristic level when structured profile is missing. */
 export function inferExperienceLevelFromContext(
   ctx: CandidateContext
 ): ExperienceLevel {
@@ -79,64 +108,147 @@ export function inferExperienceLevelFromContext(
   return "mid";
 }
 
-function buildFallbackQueries(
+function buildFallbackQueryPlans(
   ctx: CandidateContext,
-  level: ExperienceLevel
-): string[] {
+  level: ExperienceLevel,
+  language: ResolvedJobSearchLanguage
+): SearchQueryPlan[] {
   const ladderQueries = getLadderSearchQueriesFromContext(ctx, 4);
-  if (ladderQueries.length >= 2) {
-    return ladderQueries.slice(0, 4);
-  }
+  const plans: SearchQueryPlan[] = ladderQueries.map((query) => ({
+    query,
+    language: guessQueryLanguage(query) === "nl" ? "nl" : language,
+  }));
 
   const rawRoles = getTopInferredRolesFromContext(ctx, 3);
   const roles = rawRoles.map(normalizeRoleTitle).filter((r) => r.length >= 3);
   const modifiers = LEVEL_MODIFIERS[level];
-  const queries: string[] = [...ladderQueries];
 
-  for (let i = 0; i < roles.length && queries.length < 3; i++) {
+  for (let i = 0; i < roles.length && plans.length < 3; i++) {
     const role = roles[i];
+    let query = role;
     if (level === "junior" && i < 2) {
       const prefix = modifiers.prefixed[i % modifiers.prefixed.length];
-      queries.push(`${prefix} ${role}`.trim());
+      query = `${prefix} ${role}`.trim();
     } else if (modifiers.prefixed.length > 0 && i === 0) {
-      queries.push(`${modifiers.prefixed[0]} ${role}`.trim());
-    } else {
-      queries.push(role);
+      query = `${modifiers.prefixed[0]} ${role}`.trim();
+    }
+    const lang = guessQueryLanguage(query);
+    if (!plans.some((p) => p.query === query)) {
+      plans.push({ query, language: lang });
     }
   }
 
-  const defaults: Record<ExperienceLevel, string[]> = {
-    junior: [
-      "junior frontend developer",
-      "entry level web developer",
-      "junior software engineer",
-    ],
-    mid: ["frontend developer", "full stack developer", "software engineer"],
-    senior: [
-      "senior frontend developer",
-      "senior software engineer",
-      "full stack developer",
-    ],
-    staff: ["staff software engineer", "principal engineer", "senior developer"],
-    principal: [
-      "principal engineer",
-      "staff software engineer",
-      "senior architect",
-    ],
-  };
-
-  for (const q of defaults[level]) {
-    if (queries.length >= 3) break;
-    if (!queries.includes(q)) queries.push(q);
+  for (const q of genericFallbackQueries(level, language)) {
+    if (plans.length >= 4) break;
+    if (!plans.some((p) => p.query === q)) {
+      plans.push({ query: q, language: guessQueryLanguage(q) });
+    }
   }
 
-  return [...new Set(queries)].slice(0, 4);
+  const seen = new Set<string>();
+  return plans
+    .filter((p) => {
+      const key = p.query.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 4);
 }
 
-/** AI infers seniority + builds 3 board-ready search queries from CV/portfolio. */
+function applyUserLanguageLock(
+  plans: SearchQueryPlan[],
+  userSetting: JobSearchLanguageSetting
+): {
+  queryPlans: SearchQueryPlan[];
+  languageStrategy: SearchLanguageStrategy;
+  language: ResolvedJobSearchLanguage;
+} {
+  const locked =
+    userSetting === "nl" || userSetting === "en"
+      ? userSetting
+      : null;
+
+  if (locked) {
+    return {
+      queryPlans: plans.map((p) => ({ query: p.query, language: locked })),
+      languageStrategy: "single",
+      language: locked,
+    };
+  }
+
+  const primary: ResolvedJobSearchLanguage =
+    plans.filter((p) => p.language === "nl").length >=
+    plans.filter((p) => p.language === "en").length
+      ? "nl"
+      : "en";
+  const secondary: ResolvedJobSearchLanguage = primary === "nl" ? "en" : "nl";
+  const secondaryCount = plans.filter((p) => p.language === secondary).length;
+  const strategy: SearchLanguageStrategy =
+    secondaryCount > 0 ? "mixed" : "single";
+
+  // Cap secondary language slots at 2
+  let secondaryUsed = 0;
+  const capped = plans.map((p) => {
+    if (p.language === secondary) {
+      if (secondaryUsed >= 2) {
+        return { query: p.query, language: primary };
+      }
+      secondaryUsed++;
+    }
+    return p;
+  });
+
+  const finalSecondary = capped.filter((p) => p.language === secondary).length;
+  return {
+    queryPlans: capped,
+    languageStrategy: finalSecondary > 0 ? "mixed" : "single",
+    language: primary,
+  };
+}
+
+function finalizeSearchPlan(
+  queryPlans: SearchQueryPlan[],
+  inferredLevel: ExperienceLevel,
+  rationale: string,
+  languageRationale: string,
+  userSetting: JobSearchLanguageSetting
+): TailoredSearchPlan {
+  const normalized: SearchQueryPlan[] = queryPlans
+    .map((p) => ({
+      query: p.query.trim().toLowerCase(),
+      language: (p.language === "nl" ? "nl" : "en") as ResolvedJobSearchLanguage,
+    }))
+    .filter((p) => p.query.length >= 3 && p.query.split(/\s+/).length <= 6);
+
+  const { queryPlans: locked, languageStrategy, language } =
+    applyUserLanguageLock(normalized, userSetting);
+
+  return {
+    queries: locked.map((p) => p.query),
+    queryPlans: locked,
+    inferredLevel,
+    rationale: rationale.trim() || "AI-tailored ideal-next-role search",
+    languageRationale: languageRationale.trim() || "",
+    languageStrategy,
+    language,
+  };
+}
+
+/** AI infers seniority, search language strategy, and board-ready queries. */
 export async function generateTailoredSearchPlan(
-  context: CandidateContext
+  context: CandidateContext,
+  options?: { searchLanguage?: JobSearchLanguageSetting }
 ): Promise<TailoredSearchPlan> {
+  const userSetting =
+    options?.searchLanguage ??
+    context.profile.settings.jobSearchLanguage ??
+    "auto";
+  const isLocked = userSetting === "nl" || userSetting === "en";
+  const languageBlock = isLocked
+    ? searchLanguageLockedBlock(userSetting)
+    : searchLanguageAutoDecisionBlock(context);
+
   const candidateBlock = formatContextForPrompt(context, 14000);
   const seedRoles = getTopInferredRolesFromContext(context, 5).map(
     normalizeRoleTitle
@@ -148,31 +260,40 @@ export async function generateTailoredSearchPlan(
 
   try {
     const result = await generateStructured(
-      `Design a FULLY AI-powered job board search plan for this candidate's IDEAL NEXT ROLES.
+      `Design a FULLY AI-powered job board search plan for this candidate's IDEAL NEXT ROLES — roles an employer would hire them for SOON.
 
-Read their entire resume, LinkedIn, portfolio, preferences, and CAREER LADDER. Search for ladder DESTINATIONS — not clones of their current CV title.
+Read their entire resume, LinkedIn, portfolio, preferences, and CAREER LADDER.
 
-${ladderBlock || "No career ladder yet — invent 4 destination queries from transferable strengths (mix same-branch + adjacent)."}
+${ladderBlock || "No career ladder yet — invent 4 hireable-now queries from transferable strengths (same craft + mild scope step-ups)."}
 
 STEP 1 — Infer REALISTIC target experience level from evidence of ownership/years/titles:
 - Levels: junior | mid | senior | staff | principal
-- Aim one step up when the profile supports ladder climb
+- Aim one step up when the profile supports a same-craft ladder climb
 
-STEP 2 — Produce exactly 4 LinkedIn/Indeed keyword queries that target ladder destinations.
+STEP 2 — Decide search language strategy (single vs mixed) using the framework below.
+
+STEP 3 — Produce exactly 4 LinkedIn/Indeed keyword queries that find HIREABLE-NOW ideal next jobs.
+
+${languageBlock}
+
+HIREABILITY FIRST (judgment — no keyword blacklists):
+- Ask: "Would a realistic employer interview them for this title with THIS CV?" If no → do not search it.
+- Prefer CAREER LADDER nextRoles / their searchQuery phrases when those are hireable from evidence.
+- Prefer SAME-CRAFT scope step-ups (bigger team/site/warehouse/floor leadership) over inventing a new specialty profession.
+- Tools they can learn on the job are fine to search around (supervisor roles that use WMS). Specialty crafts they never practiced are not (planner / S&OP / ERP specialist / demand planning / white-collar coordinator-only titles) unless the CV already shows that craft.
+- At most ONE query may closely mirror their current job title.
+- At most ONE query may be intent="stretch" (bigger same-craft scope). The other 3 MUST be intent="next" (near-term hireable).
+- NEVER force VP/Director/C-level without leadership evidence.
+- Preferences are soft: at most one query may reflect preferred sector/comp language.
+- Vary queries; do not repeat the same role family four times.
+- Do NOT invent experience; DO invent plausible NEXT role directions supported by skills they already demonstrated.
 
 QUERY RULES:
 - 2-5 words each; role-style phrases boards understand
-- Prefer the ladder's searchQuery / nextRoles / stretchRoles titles when present
-- At most ONE query may closely mirror their current job title
-- At least TWO queries MUST be adjacent-branch destinations (slight sector/function moves that increase scope)
-- At least ONE query should be a clear scope step-up (broader ownership / lead / manager of process — not a lateral clone)
-- Include at least one "step" (near-term next) and one "stretch" destination when the ladder has both
-- NEVER force VP/Director/C-level for junior/mid without leadership evidence
-- Preferences are soft: at most one query may reflect preferred sector/comp language
-- Vary queries; do not repeat the same role family four times
-- Do NOT invent experience; DO invent plausible NEXT role directions supported by their skills/achievements
+- Tag each query with intent "next" or "stretch"
+- Language tag per query (nl/en) must match the strategy
 
-Ladder search seeds (use or refine): ${ladderQueries.join(", ") || "none — invent from profile"}
+Ladder search seeds (use or refine — drop any seed that requires a craft they lack): ${ladderQueries.join(", ") || "none — invent from profile"}
 Seed role hints: ${seedRoles.join(", ") || "infer freely from resume"}
 Heuristic level hint: ${heuristicLevel}
 ${jobPrefs ? `Job preferences (soft bias only): ${jobPrefs}` : "No special job preferences."}
@@ -180,8 +301,16 @@ ${jobPrefs ? `Job preferences (soft bias only): ${jobPrefs}` : "No special job p
 Return JSON:
 {
   "inferredExperienceLevel": "mid",
-  "searchQueries": ["query one", "query two", "query three", "query four"],
-  "rationale": "short explanation of the ladder / cross-branch / scope strategy"
+  "searchLanguageStrategy": "single" | "mixed",
+  "primarySearchLanguage": "nl" | "en",
+  "searchQueries": [
+    { "query": "teamleider logistiek", "language": "nl", "intent": "next" },
+    { "query": "magazijn supervisor", "language": "nl", "intent": "next" },
+    { "query": "voorraadbeheerder", "language": "nl", "intent": "next" },
+    { "query": "operations supervisor", "language": "en", "intent": "stretch" }
+  ],
+  "languageRationale": "why single or mixed",
+  "rationale": "short explanation of the hireable-now ladder strategy"
 }
 
 CANDIDATE:
@@ -194,27 +323,34 @@ ${candidateBlock}`,
       }
     );
 
-    const queries = result.searchQueries
-      .map((q) => q.trim().toLowerCase())
-      .filter((q) => q.length >= 3 && q.split(/\s+/).length <= 6);
+    const queryPlans: SearchQueryPlan[] = result.searchQueries.map((item) => ({
+      query: item.query,
+      language: item.language,
+    }));
 
-    if (queries.length >= 2) {
-      return {
-        queries: [...new Set(queries)].slice(0, 4),
-        inferredLevel: result.inferredExperienceLevel,
-        rationale: result.rationale?.trim() || "AI-tailored ideal-next-role search",
-      };
+    if (queryPlans.length >= 2) {
+      return finalizeSearchPlan(
+        queryPlans,
+        result.inferredExperienceLevel,
+        result.rationale,
+        result.languageRationale,
+        userSetting
+      );
     }
   } catch (e) {
     console.warn("[Job search] Tailored query generation failed:", e);
   }
 
+  const fallbackLang = resolveJobSearchLanguage(context, userSetting);
   const level = heuristicLevel;
-  return {
-    queries: buildFallbackQueries(context, level),
-    inferredLevel: level,
-    rationale: `Fallback ${level}-level queries from profile heuristics`,
-  };
+  const fallbackPlans = buildFallbackQueryPlans(context, level, fallbackLang);
+  return finalizeSearchPlan(
+    fallbackPlans,
+    level,
+    `Fallback ${level}-level queries from profile heuristics`,
+    `Fallback language: ${fallbackLang}`,
+    userSetting
+  );
 }
 
 export function seniorityLabel(level: ExperienceLevel): string {

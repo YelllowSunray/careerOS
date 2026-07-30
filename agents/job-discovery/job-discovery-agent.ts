@@ -16,6 +16,7 @@ import {
   matchListingToCandidate,
 } from "@/agents/tools/job-match";
 import {
+  isCommuteIneligible,
   isSkillIneligible,
   unmetHardRequirementLabels,
 } from "@/lib/job-search/hard-requirements";
@@ -30,6 +31,11 @@ import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { DiscoveredJobListing } from "@/agents/tools/job-discovery";
 import { isFindJobsStopped, isWorkflowPaused } from "@/lib/workflows/pause";
 import { getPrimaryCountry, effectiveRemotePreference } from "@/lib/job-search/countries";
+import {
+  browserLocaleForSearch,
+  detectListingLanguage,
+  type JobSearchLanguageSetting,
+} from "@/lib/job-search/locale";
 import { API_JOB_BOARDS, PLAYWRIGHT_JOB_BOARDS, type Job, type JobBoard, type JobMatch } from "@/lib/types";
 
 type ListingBrowser = import("playwright").Browser;
@@ -42,6 +48,8 @@ export interface JobDiscoveryInput {
   round?: number;
   /** Listing identity keys already evaluated in this workflow — skip without re-scoring. */
   skipIdentityKeys?: string[];
+  /** Override profile setting for this run. */
+  searchLanguage?: JobSearchLanguageSetting;
 }
 
 const DEFAULT_BOARDS: JobBoard[] = ["linkedin", "indeed"];
@@ -224,7 +232,14 @@ async function listingsToMatchedJobs(
         if (isSkillIneligible(matchResult)) {
           const hardGaps = unmetHardRequirementLabels(matchResult.missingSkills);
           console.log(
-            `[Job discovery] [${platform}] Rejected (skills): ${listing.title} @ ${listing.company} · skillRequirementMet=${matchResult.skillRequirementMet} · hard gaps [${hardGaps.join(", ") || "—"}] — ${matchResult.skillNotes || "core skill fit not met"}`
+            `[Job discovery] [${platform}] Rejected (skills): ${listing.title} @ ${listing.company} · coreCraftFit=${matchResult.coreCraftFit ?? "?"} · skillRequirementMet=${matchResult.skillRequirementMet} · must-have [${hardGaps.join(", ") || "—"}] — ${matchResult.skillNotes || "core skill fit not met"}`
+          );
+          return { kind: "rejected" as const, identityKey };
+        }
+
+        if (isCommuteIneligible(matchResult)) {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (commute): ${listing.title} @ ${listing.company} · ${matchResult.commuteNotes || "commute exceeds limit"}`
           );
           return { kind: "rejected" as const, identityKey };
         }
@@ -255,6 +270,10 @@ async function listingsToMatchedJobs(
           location: fallback.location,
           description: fallback.description,
           requirements: fallback.requirements,
+          listingLanguage: detectListingLanguage(
+            fallback.title,
+            fallback.description || text
+          ),
           extractedSkills: fallback.extractedSkills,
           discoveredVia: searchTerms.filter(
             (t) =>
@@ -289,6 +308,10 @@ async function listingsToMatchedJobs(
           languageNotes: matchResult.languageNotes,
           skillRequirementMet: matchResult.skillRequirementMet,
           skillNotes: matchResult.skillNotes,
+          coreCraftFit: matchResult.coreCraftFit,
+          commuteRequirementMet: matchResult.commuteRequirementMet,
+          commuteNotes: matchResult.commuteNotes,
+          estimatedCommuteMinutes: matchResult.estimatedCommuteMinutes,
           scopeIncrease: matchResult.scopeIncrease,
           scopeNotes: matchResult.scopeNotes,
           pathType: matchResult.pathType,
@@ -298,7 +321,7 @@ async function listingsToMatchedJobs(
         };
 
         console.log(
-          `[Job discovery] [${platform}] Matched (${matchResult.fitScore}): ${job.title} @ ${job.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}/S${matchResult.scopeIncrease} · ${matchResult.pathType}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
+          `[Job discovery] [${platform}] Matched (${matchResult.fitScore}): ${job.title} @ ${job.company} · C${matchResult.contributionScore}/L${matchResult.learningScore}/M${matchResult.moneyScore}/S${matchResult.scopeIncrease} · ${matchResult.pathType} · craft=${matchResult.coreCraftFit ?? "?"}${matchResult.preferencesMatch === false ? " [prefs soft-mismatch]" : ""}`
         );
         return { kind: "matched" as const, job, match, identityKey };
       } catch (e) {
@@ -311,7 +334,10 @@ async function listingsToMatchedJobs(
     });
 
     for (const outcome of outcomes) {
-      evaluatedListingKeys.push(outcome.identityKey);
+      // Only remember decided listings. Pause/error skips must be retryable on resume.
+      if (outcome.kind === "matched" || outcome.kind === "rejected") {
+        evaluatedListingKeys.push(outcome.identityKey);
+      }
       if (outcome.kind === "matched") {
         if (knownKeys.has(outcome.identityKey)) continue;
         await saveJob(outcome.job);
@@ -373,15 +399,29 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
         );
       }
 
-      const searchPlan = await generateTailoredSearchPlan(input.context);
+      const searchPlan = await generateTailoredSearchPlan(input.context, {
+        searchLanguage:
+          input.searchLanguage ??
+          settings.jobSearchLanguage ??
+          "auto",
+      });
       const searchTerms = searchPlan.queries;
+      const queryPlans = searchPlan.queryPlans;
       if (workflowId && (await isFindJobsStopped(workflowId))) {
         return { success: true, data: [], paused: await isWorkflowPaused(workflowId) };
       }
 
+      const queryLangSummary = queryPlans
+        .map((p) => `${p.query} [${p.language}]`)
+        .join(" | ");
       console.log(
-        `[Job discovery] Tailored search (${searchPlan.inferredLevel}): ${searchTerms.join(" | ")}`
+        `[Job discovery] Tailored search (${searchPlan.inferredLevel}, ${searchPlan.languageStrategy}/${searchPlan.language}): ${queryLangSummary}`
       );
+      if (searchPlan.languageRationale) {
+        console.log(
+          `[Job discovery] Search language: ${searchPlan.languageRationale}`
+        );
+      }
       if (searchPlan.rationale) {
         console.log(`[Job discovery] Search rationale: ${searchPlan.rationale}`);
       }
@@ -421,7 +461,7 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
             "[Job discovery] Treating search as remote (from job preferences text)"
           );
         }
-        const boardProfile = {
+        const boardProfileBase = {
           preferredCountries: input.context.profile.preferredCountries,
           workPreference: remotePref,
           experienceLevel: searchPlan.inferredLevel,
@@ -433,8 +473,11 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
             "@/agents/tools/job-discovery-social"
           );
           const batches = await Promise.all(
-            searchTerms.map((query) =>
-              searchPlaywrightJobBoards(query, socialBoards, ctx.userId, boardProfile)
+            queryPlans.map(({ query, language }) =>
+              searchPlaywrightJobBoards(query, socialBoards, ctx.userId, {
+                ...boardProfileBase,
+                locale: browserLocaleForSearch(language),
+              })
             )
           );
           socialListings.push(...batches.flat());
@@ -443,8 +486,11 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
             "[Job discovery] Serverless mode: LinkedIn guest HTTP only (no Playwright)"
           );
           const batches = await Promise.all(
-            searchTerms.map((query) =>
-              searchJobBoardsHttp(query, socialBoards, ctx.userId, boardProfile)
+            queryPlans.map(({ query, language }) =>
+              searchJobBoardsHttp(query, socialBoards, ctx.userId, {
+                ...boardProfileBase,
+                locale: browserLocaleForSearch(language),
+              })
             )
           );
           socialListings.push(...batches.flat());
@@ -507,7 +553,7 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
         toEvaluate = await filterListingsForCandidate(
           candidatePool,
           input.context,
-          55,
+          40,
           searchPlan.inferredLevel
         );
         console.log(
@@ -564,6 +610,10 @@ export const jobDiscoveryAgent: Agent<JobDiscoveryInput, Job[]> = {
           searchPlan: {
             inferredLevel: searchPlan.inferredLevel,
             queries: searchTerms,
+            queryPlans: searchPlan.queryPlans,
+            languageStrategy: searchPlan.languageStrategy,
+            language: searchPlan.language,
+            languageRationale: searchPlan.languageRationale,
             rationale: searchPlan.rationale,
           },
           boards,

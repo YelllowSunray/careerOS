@@ -2,6 +2,7 @@ import type { Agent } from "@/agents/core/agent";
 import type { AgentContext, AgentResult } from "@/agents/core/context";
 import { matchJobToCandidate } from "@/agents/tools/job-match";
 import {
+  isCommuteIneligible,
   isSkillIneligible,
   unmetHardRequirementLabels,
 } from "@/lib/job-search/hard-requirements";
@@ -52,7 +53,13 @@ export const jobMatchingAgent: Agent<JobMatchingInput, JobMatch[]> = {
         }
         if (isSkillIneligible(result)) {
           console.log(
-            `[Job matching] Skipped (skills): ${job.title} @ ${job.company} · skillRequirementMet=${result.skillRequirementMet} · [${unmetHardRequirementLabels(result.missingSkills).join(", ") || result.skillNotes || "core skill fit not met"}]`
+            `[Job matching] Skipped (skills): ${job.title} @ ${job.company} · coreCraftFit=${result.coreCraftFit ?? "?"} · skillRequirementMet=${result.skillRequirementMet} · [${unmetHardRequirementLabels(result.missingSkills).join(", ") || result.skillNotes || "core skill fit not met"}]`
+          );
+          continue;
+        }
+        if (isCommuteIneligible(result)) {
+          console.log(
+            `[Job matching] Skipped (commute): ${job.title} @ ${job.company} · ${result.commuteNotes || "commute exceeds limit"}`
           );
           continue;
         }
@@ -78,6 +85,10 @@ export const jobMatchingAgent: Agent<JobMatchingInput, JobMatch[]> = {
           languageNotes: result.languageNotes,
           skillRequirementMet: result.skillRequirementMet,
           skillNotes: result.skillNotes,
+          coreCraftFit: result.coreCraftFit,
+          commuteRequirementMet: result.commuteRequirementMet,
+          commuteNotes: result.commuteNotes,
+          estimatedCommuteMinutes: result.estimatedCommuteMinutes,
           scopeIncrease: result.scopeIncrease,
           scopeNotes: result.scopeNotes,
           pathType: result.pathType,

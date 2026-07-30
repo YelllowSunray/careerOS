@@ -16,8 +16,11 @@ import {
   getJob,
   getJobMatch,
   getLinkedInProfile,
+  getJobSearchState,
+  mergeEvaluatedListingKeys,
 } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
+import type { JobSearchLanguageSetting } from "@/lib/types";
 import {
   isFindJobsStopped,
   isWorkflowPaused,
@@ -219,16 +222,29 @@ export class WorkflowOrchestrator {
 
   async startFindJobs(
     userId: string,
-    fitScoreThreshold = 85
+    fitScoreThreshold = 85,
+    searchLanguage?: JobSearchLanguageSetting
   ): Promise<Workflow> {
+    // Carry evaluated listing keys across pause→restart until Clear Results.
+    const searchState = await getJobSearchState(userId);
+    const evaluatedListingKeys = searchState?.evaluatedListingKeys ?? [];
+
     const workflow = createWorkflow(
       userId,
       "find_jobs",
       ["job_discovery"],
-      { fitScoreThreshold, evaluatedListingKeys: [], round: 0 }
+      {
+        fitScoreThreshold,
+        evaluatedListingKeys,
+        round: 0,
+        ...(searchLanguage ? { searchLanguage } : {}),
+      }
     );
     workflow.lastActivityAt = workflow.startedAt;
     await saveWorkflow(workflow);
+    console.log(
+      `[Find jobs] Starting with ${evaluatedListingKeys.length} previously evaluated listings (skipped until Clear Results)`
+    );
     return workflow;
   }
 
@@ -298,6 +314,18 @@ export class WorkflowOrchestrator {
       let evaluatedListingKeys = Array.isArray(workflow.config.evaluatedListingKeys)
         ? [...(workflow.config.evaluatedListingKeys as string[])]
         : [];
+      // Prefer durable memory (survives pause → new workflow) over empty config.
+      if (evaluatedListingKeys.length === 0) {
+        const searchState = await getJobSearchState(userId);
+        if (searchState?.evaluatedListingKeys?.length) {
+          evaluatedListingKeys = [...searchState.evaluatedListingKeys];
+        }
+      }
+
+      const searchLanguage =
+        (workflow.config.searchLanguage as JobSearchLanguageSetting | undefined) ??
+        context.profile.settings.jobSearchLanguage ??
+        "auto";
 
       const jobDiscoveryAgent = await loadJobDiscoveryAgent();
 
@@ -322,6 +350,7 @@ export class WorkflowOrchestrator {
             minFitScore: fitScoreThreshold,
             round,
             skipIdentityKeys: evaluatedListingKeys,
+            searchLanguage,
           },
           ctx
         );
@@ -343,13 +372,17 @@ export class WorkflowOrchestrator {
         const newKeys = Array.isArray(discovery.metadata?.evaluatedListingKeys)
           ? (discovery.metadata.evaluatedListingKeys as string[])
           : [];
-        for (const key of newKeys) {
-          if (!evaluatedListingKeys.includes(key)) {
-            evaluatedListingKeys.push(key);
-          }
-        }
+        evaluatedListingKeys = await mergeEvaluatedListingKeys(
+          userId,
+          newKeys
+        );
 
         const discovered = discovery.data?.length ?? 0;
+        const searchPlanMeta =
+          discovery.metadata?.searchPlan &&
+          typeof discovery.metadata.searchPlan === "object"
+            ? discovery.metadata.searchPlan
+            : undefined;
         workflow.config = {
           ...workflow.config,
           fitScoreThreshold,
@@ -357,6 +390,7 @@ export class WorkflowOrchestrator {
           evaluatedListingKeys,
           lastRoundDiscovered: discovered,
           searchingRound: round,
+          ...(searchPlanMeta ? { searchPlan: searchPlanMeta } : {}),
         };
 
         await this.touchFindJobs(workflow, {
@@ -367,6 +401,22 @@ export class WorkflowOrchestrator {
         console.log(
           `[Find jobs] Round ${round} done — ${discovered} new jobs (tracking ${evaluatedListingKeys.length} evaluated listings)`
         );
+
+        // Refresh education / cert path from ladder + newly matched job requirements.
+        if (discovered > 0 || round === 1) {
+          try {
+            const { refreshEducationRecommendations } = await import(
+              "@/agents/tools/education-recommend"
+            );
+            const eduCtx = await buildCandidateContext(userId);
+            await refreshEducationRecommendations(eduCtx);
+          } catch (eduErr) {
+            console.warn(
+              "[Find jobs] Education recommend skipped:",
+              eduErr instanceof Error ? eduErr.message : eduErr
+            );
+          }
+        }
 
         if (await isWorkflowPaused(workflowId)) {
           throw new WorkflowPausedError();

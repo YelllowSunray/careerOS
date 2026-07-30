@@ -6,6 +6,7 @@ import {
   getLinkedInProfile,
 } from "@/services/firestore";
 import { getPrimaryCountry } from "@/lib/job-search/countries";
+import { formatCommuteForPrompt } from "@/lib/commute/helpers";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { ResumeData, PortfolioSite } from "@/lib/types";
 
@@ -128,6 +129,7 @@ export function formatContextForPrompt(ctx: CandidateContext, maxChars = 20000):
     ctx.profile.jobPreferences?.trim()
       ? `Job preferences: ${ctx.profile.jobPreferences.trim()}`
       : "",
+    formatCommuteForPrompt(ctx.profile),
     "",
     "=== RESUME (source of truth) ===",
     ctx.resumeRawText || "(no resume text)",

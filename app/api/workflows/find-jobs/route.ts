@@ -1,12 +1,23 @@
 import { NextRequest, after } from "next/server";
 import { verifyAuth, jsonError, jsonOk, AuthError } from "@/lib/api/auth";
 import { orchestrator } from "@/agents/core/orchestrator";
-import { getLatestWorkflow, getProfile, updateWorkflow } from "@/services/firestore";
+import {
+  getLatestWorkflow,
+  getProfile,
+  saveProfile,
+  updateWorkflow,
+} from "@/services/firestore";
 import { markFindJobsDone, markFindJobsLive } from "@/lib/workflows/live";
 import { isOrphanedFindJobs, isWorkflowStale } from "@/lib/workflows/stale";
 import { nowIso } from "@/lib/utils/dates";
+import type { JobSearchLanguageSetting } from "@/lib/job-search/locale";
 
 export const maxDuration = 300;
+
+function parseSearchLanguage(raw: unknown): JobSearchLanguageSetting | undefined {
+  if (raw === "auto" || raw === "en" || raw === "nl") return raw;
+  return undefined;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,6 +26,30 @@ export async function POST(request: NextRequest) {
     const threshold =
       profile?.settings.fitScoreThreshold ??
       Number(process.env.FIT_SCORE_DEFAULT_THRESHOLD ?? 85);
+
+    let body: { searchLanguage?: JobSearchLanguageSetting } = {};
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      // no body — use profile default
+    }
+
+    const searchLanguage =
+      parseSearchLanguage(body.searchLanguage) ??
+      profile?.settings.jobSearchLanguage ??
+      "auto";
+
+    if (
+      profile &&
+      parseSearchLanguage(body.searchLanguage) &&
+      profile.settings.jobSearchLanguage !== searchLanguage
+    ) {
+      await saveProfile({
+        ...profile,
+        settings: { ...profile.settings, jobSearchLanguage: searchLanguage },
+        updatedAt: nowIso(),
+      });
+    }
 
     const existing = await getLatestWorkflow(userId, "find_jobs");
     if (existing?.status === "running" && !isWorkflowStale(existing)) {
@@ -36,7 +71,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const workflow = await orchestrator.startFindJobs(userId, threshold);
+    const workflow = await orchestrator.startFindJobs(
+      userId,
+      threshold,
+      searchLanguage
+    );
     markFindJobsLive(workflow.id);
 
     const run = async () => {

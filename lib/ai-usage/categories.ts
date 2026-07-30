@@ -17,6 +17,7 @@ const JOB_SEARCH_OPS = new Set([
   "listing_match",
   "job_parse",
   "job_match",
+  "education_recommend",
 ]);
 
 const APPLICATION_OPS = new Set([

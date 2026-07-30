@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardTitle } from "@/components/ui/card";
 import { normalizePreferredCountries } from "@/lib/job-search/countries";
 import { parseLanguagesSpoken } from "@/components/profile/profile-form";
+import { parseCommuteMaxMinutesFromForm } from "@/lib/commute/helpers";
 
 export default function OnboardingPage() {
   const { user } = useAuth();
@@ -30,6 +31,10 @@ export default function OnboardingPage() {
   const [workPreference, setWorkPreference] = useState("any");
   const [jobPreferences, setJobPreferences] = useState("");
   const [languagesSpoken, setLanguagesSpoken] = useState("English");
+  const [homeLocation, setHomeLocation] = useState("");
+  const [commuteMode, setCommuteMode] = useState("");
+  const [commuteMaxMinutes, setCommuteMaxMinutes] = useState("");
+  const [commuteNoLimit, setCommuteNoLimit] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeError, setResumeError] = useState("");
 
@@ -52,6 +57,19 @@ export default function OnboardingPage() {
     setLoading(true);
     setError("");
     try {
+      const parsedCommuteMax = parseCommuteMaxMinutesFromForm(
+        commuteMaxMinutes,
+        commuteNoLimit
+      );
+      const commutePayload =
+        homeLocation.trim() && commuteMode
+          ? {
+              homeLocation: homeLocation.trim(),
+              commuteMode,
+              commuteMaxMinutes: parsedCommuteMax ?? null,
+            }
+          : {};
+
       await apiFetch("/api/profile", {
         method: "PUT",
         body: JSON.stringify({
@@ -68,6 +86,7 @@ export default function OnboardingPage() {
           workPreference,
           jobPreferences: jobPreferences.trim() || undefined,
           languagesSpoken: parseLanguagesSpoken(languagesSpoken),
+          ...commutePayload,
           onboardingComplete: true,
         }),
       });
@@ -180,6 +199,57 @@ export default function OnboardingPage() {
               <p className="mt-1 text-xs text-zinc-500">
                 Comma-separated. Jobs that require a language you do not speak will not be shown.
               </p>
+            </div>
+            <div>
+              <Label htmlFor="home">Home base (for commute)</Label>
+              <Input
+                id="home"
+                value={homeLocation}
+                onChange={(e) => setHomeLocation(e.target.value)}
+                placeholder="Baarn, Netherlands"
+              />
+            </div>
+            <div>
+              <Label htmlFor="commute-mode">Commute mode</Label>
+              <select
+                id="commute-mode"
+                value={commuteMode}
+                onChange={(e) => setCommuteMode(e.target.value)}
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              >
+                <option value="">Not set</option>
+                <option value="car">Car</option>
+                <option value="bike">Bike</option>
+                <option value="public_transit">Public transport</option>
+                <option value="walk">Walking</option>
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="commute-max">Max one-way commute (minutes)</Label>
+              <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  id="commute-max"
+                  type="number"
+                  min={1}
+                  value={commuteMaxMinutes}
+                  onChange={(e) => setCommuteMaxMinutes(e.target.value)}
+                  placeholder="30"
+                  disabled={commuteNoLimit}
+                  className="sm:max-w-[8rem]"
+                />
+                <label className="flex items-center gap-2 text-sm text-zinc-600">
+                  <input
+                    type="checkbox"
+                    checked={commuteNoLimit}
+                    onChange={(e) => {
+                      setCommuteNoLimit(e.target.checked);
+                      if (e.target.checked) setCommuteMaxMinutes("");
+                    }}
+                    className="rounded border-zinc-300"
+                  />
+                  No limit
+                </label>
+              </div>
             </div>
             <div>
               <Label htmlFor="job-prefs">What type of job do you want?</Label>

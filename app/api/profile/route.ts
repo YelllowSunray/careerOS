@@ -4,6 +4,14 @@ import { getProfile, saveProfile } from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
 import type { UserProfile } from "@/lib/types";
 
+const COMMUTE_MODES = new Set(["car", "bike", "public_transit", "walk"]);
+
+function parseCommuteMode(raw: unknown): UserProfile["commuteMode"] | undefined {
+  const s = String(raw ?? "").trim();
+  if (!s) return undefined;
+  return COMMUTE_MODES.has(s) ? (s as UserProfile["commuteMode"]) : undefined;
+}
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -60,6 +68,23 @@ export async function PUT(request: NextRequest) {
             ),
           ]
         : (existing?.languagesSpoken ?? []),
+      homeLocation:
+        body.homeLocation !== undefined
+          ? String(body.homeLocation).trim() || undefined
+          : existing?.homeLocation,
+      commuteMode:
+        body.commuteMode !== undefined
+          ? parseCommuteMode(body.commuteMode)
+          : existing?.commuteMode,
+      commuteMaxMinutes:
+        body.commuteMaxMinutes !== undefined
+          ? body.commuteMaxMinutes === null
+            ? null
+            : Number.isFinite(Number(body.commuteMaxMinutes)) &&
+                Number(body.commuteMaxMinutes) > 0
+              ? Math.round(Number(body.commuteMaxMinutes))
+              : undefined
+          : existing?.commuteMaxMinutes,
       resume: body.resume ?? existing?.resume,
       coverLetters: body.coverLetters ?? existing?.coverLetters ?? [],
       onboardingComplete: body.onboardingComplete ?? existing?.onboardingComplete ?? false,

@@ -1,8 +1,12 @@
 import type { Agent } from "@/agents/core/agent";
 import type { AgentContext, AgentResult } from "@/agents/core/context";
 import { synthesizeCandidateProfile } from "@/agents/tools/profile-extract";
+import { refreshEducationRecommendations } from "@/agents/tools/education-recommend";
 import { buildCandidateContext } from "@/lib/candidate/context";
-import { saveCandidateProfile } from "@/services/firestore";
+import {
+  getCandidateProfile,
+  saveCandidateProfile,
+} from "@/services/firestore";
 import { nowIso } from "@/lib/utils/dates";
 import type { CandidateProfile, CandidateProject } from "@/lib/types";
 
@@ -47,6 +51,9 @@ export const candidateProfileAgent: Agent<void, CandidateProfile> = {
         source: p.source as CandidateProject["source"],
       }));
 
+      // Preserve prior education path across re-synthesis; refresh below.
+      const prior = await getCandidateProfile(ctx.userId);
+
       const profile: CandidateProfile = {
         userId: ctx.userId,
         skills: synthesized.skills,
@@ -62,6 +69,15 @@ export const candidateProfileAgent: Agent<void, CandidateProfile> = {
         experienceLevel: synthesized.experienceLevel,
         strengths: synthesized.strengths,
         gaps: synthesized.gaps,
+        ...(prior?.educationRecommendations?.length
+          ? {
+              educationRecommendations: prior.educationRecommendations,
+              educationRecommendationsSummary:
+                prior.educationRecommendationsSummary,
+              educationRecommendationsGeneratedAt:
+                prior.educationRecommendationsGeneratedAt,
+            }
+          : {}),
         sources: {
           resume: context.resumeRawText.length > 0,
           portfolio: context.portfolioRawText.length > 0,
@@ -73,7 +89,20 @@ export const candidateProfileAgent: Agent<void, CandidateProfile> = {
       };
 
       await saveCandidateProfile(profile);
-      return { success: true, data: profile };
+
+      // Seed / refresh education path from ladder (+ any existing jobs).
+      try {
+        const freshCtx = await buildCandidateContext(ctx.userId);
+        await refreshEducationRecommendations(freshCtx);
+        const updated = await getCandidateProfile(ctx.userId);
+        return { success: true, data: updated ?? profile };
+      } catch (eduErr) {
+        console.warn(
+          "[Candidate profile] Education recommend skipped:",
+          eduErr instanceof Error ? eduErr.message : eduErr
+        );
+        return { success: true, data: profile };
+      }
     } catch (e) {
       return {
         success: false,

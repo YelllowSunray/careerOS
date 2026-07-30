@@ -1,4 +1,8 @@
-import type { UserProfile, WorkPreference } from "@/lib/types";
+import type { CommuteMode, UserProfile, WorkPreference } from "@/lib/types";
+import {
+  commuteMaxMinutesToForm,
+  parseCommuteMaxMinutesFromForm,
+} from "@/lib/commute/helpers";
 import { normalizePreferredCountries } from "@/lib/job-search/countries";
 
 export interface ProfileFormValues {
@@ -13,6 +17,10 @@ export interface ProfileFormValues {
   jobPreferences: string;
   /** Comma-separated language names */
   languagesSpoken: string;
+  homeLocation: string;
+  commuteMode: CommuteMode | "";
+  commuteMaxMinutes: string;
+  commuteNoLimit: boolean;
 }
 
 export function parseLanguagesSpoken(raw: string): string[] {
@@ -31,6 +39,7 @@ export function profileToFormValues(
   profile: UserProfile,
   phone?: string
 ): ProfileFormValues {
+  const commuteForm = commuteMaxMinutesToForm(profile.commuteMaxMinutes);
   return {
     name: profile.name,
     email: profile.email,
@@ -42,6 +51,10 @@ export function profileToFormValues(
     workPreference: profile.workPreference,
     jobPreferences: profile.jobPreferences ?? "",
     languagesSpoken: (profile.languagesSpoken ?? []).join(", "),
+    homeLocation: profile.homeLocation ?? "",
+    commuteMode: profile.commuteMode ?? "",
+    commuteMaxMinutes: commuteForm.minutes,
+    commuteNoLimit: commuteForm.noLimit,
   };
 }
 
@@ -50,6 +63,19 @@ export function formValuesToProfileUpdate(
   existing: UserProfile
 ): Partial<UserProfile> {
   const languages = parseLanguagesSpoken(values.languagesSpoken);
+  const homeLocation = values.homeLocation.trim() || undefined;
+  const commuteMode = values.commuteMode || undefined;
+  const parsedMax = parseCommuteMaxMinutesFromForm(
+    values.commuteMaxMinutes,
+    values.commuteNoLimit
+  );
+  const commuteMaxMinutes =
+    homeLocation && commuteMode
+      ? parsedMax === undefined
+        ? existing.commuteMaxMinutes
+        : parsedMax
+      : undefined;
+
   return {
     name: values.name.trim(),
     email: values.email.trim(),
@@ -64,6 +90,9 @@ export function formValuesToProfileUpdate(
     workPreference: values.workPreference,
     jobPreferences: values.jobPreferences.trim() || undefined,
     languagesSpoken: languages.length > 0 ? languages : [],
+    homeLocation,
+    commuteMode,
+    commuteMaxMinutes,
     onboardingComplete: existing.onboardingComplete,
     settings: existing.settings,
     resume: existing.resume,

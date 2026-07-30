@@ -35,7 +35,7 @@ const relevanceBatchSchema = z.object({
 export async function filterListingsForCandidate(
   listings: DiscoveredJobListing[],
   context: CandidateContext,
-  minScore = 55,
+  minScore = 40,
   targetLevel?: ExperienceLevel
 ): Promise<DiscoveredJobListing[]> {
   if (listings.length === 0) return [];
@@ -60,8 +60,9 @@ export async function filterListingsForCandidate(
 
     try {
       const result = await generateStructured(
-        `Score whether each listing could be an IDEAL NEXT ROLE for this candidate.
-Use the FULL resume/portfolio — do not require the same job title or branch as their current role.
+        `COARSE SIEVE only — deep match will decide eligibility later.
+Keep listings that could plausibly be an IDEAL NEXT ROLE (same craft or clear duty transfer).
+Prefer FALSE POSITIVES over false negatives: when unsure, mark relevant=true.
 
 Return JSON:
 {
@@ -71,19 +72,20 @@ Return JSON:
 }
 One result per listing index.
 
-REJECT (relevant=false, score<40):
-- Entirely unrelated professions with no transferable path from their profile
-- Extreme seniority gaps (intern for senior+; C-suite for junior with no leadership evidence)
+REJECT (relevant=false, score<35) ONLY when clearly:
+- Entirely unrelated profession with no transferable path from their profile
+- Extreme seniority gap (intern for senior+; C-suite for junior with no leadership evidence)
+- Title that invents a specialty craft the CV never practiced AND day-to-day duties would not transfer
 
-ACCEPT (relevant=true, score 55+):
-- Same branch OR different branch where transferable strengths make contribution plausible soon
-- Seniority step-ups and broader-scope roles that climb the ladder
-- Roles that expand capabilities (learning) and look commercially sensible (money)
-- Prefer listings that map to CAREER LADDER next/stretch destinations (scope step-ups and adjacent moves)
-- Do NOT reject just because the title differs from their current role
-- Preferences are soft bias only
+ACCEPT (relevant=true) generously:
+- Same craft OR adjacent work where duties could transfer — including titles that mention tools/systems they can learn on the job
+- Bigger-scope versions of what they already do (larger team/site/warehouse/ops leadership)
+- Mild seniority step-ups when ownership evidence supports it
+- Ladder next/stretch destinations that look hireable from the CV
+- Do NOT reject just because a posting title mentions software/tools they have not mastered
+- Preferences are soft bias only — never the sole reason to reject
 
-relevanceScore = AI judgment of contribution × learning × money × scope potential as an ideal next step.
+relevanceScore = rough judgment that this could be a real next step (40–100 keep zone). Score ≥40 should usually be relevant=true.
 
 Work preference: ${workPref}
 Preferred locations: ${countries}

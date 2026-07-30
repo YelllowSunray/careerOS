@@ -6,13 +6,18 @@ import {
   formatCareerLadderForPrompt,
 } from "@/lib/candidate/context";
 import { getPrimaryCountry } from "@/lib/job-search/countries";
+import { formatCommuteForPrompt } from "@/lib/commute/helpers";
+import { screenCommute } from "@/lib/commute/screening";
 import { inferExperienceLevelFromContext, seniorityLabel } from "@/lib/job-search/tailored-queries";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { Job, JobPathType } from "@/lib/types";
 import {
   hasUnmetHardRequirements,
   isSkillIneligible,
+  normalizeCoreCraftFit,
+  toMissingSkill,
 } from "@/lib/job-search/hard-requirements";
+import type { CoreCraftFit, GapLearnability } from "@/lib/types";
 
 const matchSchema = z.object({
   fitScore: z.number(),
@@ -24,6 +29,7 @@ const matchSchema = z.object({
   missingSkills: z.array(
     z.object({
       skill: z.string(),
+      learnability: z.enum(["must_have", "learn_on_job", "nice_to_have"]),
       isHardRequirement: z.boolean(),
     })
   ),
@@ -38,9 +44,17 @@ const matchSchema = z.object({
   requiredLanguages: z.array(z.string()),
   languageRequirementMet: z.boolean(),
   languageNotes: z.string(),
-  /** False = do not show — candidate lacks core skill/credential fit for this role. */
+  /**
+   * Primary skill gate (AI judgment):
+   * day_one / with_ramp → show job; not_eligible → hide.
+   */
+  coreCraftFit: z.enum(["day_one", "with_ramp", "not_eligible"]),
+  /** Derived from coreCraftFit — false only when not_eligible. */
   skillRequirementMet: z.boolean(),
   skillNotes: z.string(),
+  commuteRequirementMet: z.boolean(),
+  commuteNotes: z.string(),
+  estimatedCommuteMinutes: z.number().optional(),
   pathType: z.enum(["step", "stretch", "destination", "lateral"]),
   ladderPath: z.string(),
   matchedDestination: z.string().optional(),
@@ -77,6 +91,8 @@ Rules:
 If the posting has a clear hard language requirement other than optional English, set languageRequirementMet=false.
 If no hard language requirement, languageRequirementMet=true and requiredLanguages=[].`;
 
+  const commuteBlock = formatCommuteForPrompt(context.profile);
+
   const preferenceBlock = jobPrefs
     ? `
 CANDIDATE JOB PREFERENCES (free text — soft context for all three pillars, not a veto):
@@ -98,14 +114,17 @@ ${ladderBlock}
 LADDER MATCHING RULES:
 - Score this job against ladder DESTINATIONS (next + stretch), not "does the title match the CV".
 - Prefer same-title BIGGER SCOPE and adjacent-title BROADER OWNERSHIP over lateral clones.
+- BUT: ladder destination alone does NOT make them eligible. If coreCraftFit=not_eligible, hide even if the title matches a stretch role.
 - pathType:
-  - "step": maps to a nextRoles destination (~0–18 months) or unlocks one soon
-  - "stretch": maps to a stretchRoles destination or clear ambitious climb
-  - "destination": strong direct hit on a ladder title (next or stretch)
-  - "lateral": same scope / title synonym with no meaningful climb — score lower
+  - "step": maps to a nextRoles destination (~0–18 months) or unlocks one soon AND contribution is credible
+  - "stretch": maps to a stretchRoles destination or clear ambitious climb AND contribution is credible
+  - "destination": strong direct hit on a ladder title (next or stretch) AND contribution is credible
+  - "lateral": same scope / title synonym with no meaningful climb — or overqualified for a smaller role — score lower
 - matchedDestination: ladder title this job maps to (or omit if none)
 - ladderPath: one sentence path, e.g. "This Risk Analyst role → positions you for Senior Compliance / Governance in 1–2 moves"
-- scopeIncrease (0-100): team size, budget, stakeholders, decision rights, market size, IC→lead — NOT title synonymy. Lateral clones ≤35.`
+- scopeIncrease (0-100): team size, budget, stakeholders, decision rights, market size, IC→lead — NOT title synonymy. Lateral clones ≤35.
+- reasoning MUST be consistent with coreCraftFit, skillRequirementMet, commuteRequirementMet, and pathType (do not claim commute fails if commuteRequirementMet=true).
+- applyRecommendation=true ONLY when skillRequirementMet AND commuteRequirementMet AND fitScore≥50 AND the role is a credible step/stretch/destination — NEVER recommend pure laterals as career applications unless the candidate is unemployed / seeking any work.`
     : `
 No career ladder cached — still score scopeIncrease vs current role evidence.
 Prefer scope step-ups and adjacent moves over lateral title clones.
@@ -118,13 +137,16 @@ Core idea: ladder climbing via contribution × learning × money × SCOPE INCREA
 
 THE THREE PILLARS (score each 0-100 from the full profile + posting — pure judgment, no keyword rules):
 
-1) CONTRIBUTION — Can they create real value here soon?
-   Map transferable strengths onto THIS role — even if the title differs.
-   High = meaningful impact within months; low = years of catch-up or wrong craft entirely.
+1) CONTRIBUTION — Can they DO the core deliverables of this role within ~90 days (including while ramping on learn_on_job tools)?
+   Score what they can deliver soon on the SAME craft — not what they might become in a different profession.
+   High = meaningful impact within months; low = wrong craft or years of catch-up.
+   If coreCraftFit=not_eligible, contributionScore MUST be ≤45.
+   If coreCraftFit=day_one or with_ramp, contribution can still be high (60–90) even with tool gaps.
 
-2) LEARNING — Does this raise their ceiling?
-   New scope, harder problems, leadership, new markets/tools/licenses, clear step up.
-   Same-title lateral moves with no new scope score lower than an adjacent stretch that expands capability.
+2) LEARNING — Does this raise their ceiling over time?
+   New scope, harder problems, leadership, tools they'll ramp on — raise learningScore when learn_on_job gaps exist or coreCraftFit=with_ramp.
+   learningScore MUST NOT inflate eligibility when coreCraftFit=not_eligible.
+   A training budget does NOT turn a specialty lead role into a fit if they must already lead that specialty.
 
 3) MONEY — Compensation quality vs level and prefs.
    Use disclosed pay when present; otherwise infer plausibly and note uncertainty.
@@ -135,11 +157,12 @@ SCOPE INCREASE (0-100) — fourth signal, explicit:
 - Low score for title synonyms with identical scope.
 
 OVERALL fitScore (0-100):
-- Maximize contribution × learning × money, heavily weighted by scopeIncrease and ladder fit.
-- Prefer step/stretch/destination over lateral.
+- contributionScore is the primary driver — fitScore should rarely exceed contributionScore + 15.
+- learningScore and scopeIncrease are tiebreakers only when contribution is credible (≥55).
+- Prefer step/stretch/destination over lateral ONLY when contribution is credible.
 - DO NOT require the job title or branch to match their current title.
 - Mild seniority stretch (+1) is welcome when contribution stays credible.
-- Only tank scores for clear wrong-career mismatches.
+- If core deliverables are unmet, fitScore MUST be ≤50 regardless of learning/money/scope.
 
 TARGET SENIORITY BASELINE: ${seniorityLabel(targetLevel)} (stretch up is encouraged when earned by the profile).
 
@@ -147,29 +170,46 @@ ${preferenceBlock}
 
 ${languageBlock}
 
+${commuteBlock}
+
 ${ladderScoringBlock}
 
 preferencesMatch: soft true/false vs stated prefs (informational only — never veto an ideal ladder move).
 languageRequirementMet: HARD gate — false means this job must not be shown to the candidate.
+commuteRequirementMet: HARD gate when max commute minutes is set — false means commute is too far for the candidate's mode/limit. True when remote or within limit.
 
-SKILL / CREDENTIAL FIT (HARD gate — AI judgment only, no keyword rules):
-Set skillRequirementMet=true ONLY if the candidate can plausibly do the CORE work of this role soon using transferable evidence from their profile.
-Set skillRequirementMet=false when the posting's core craft / must-haves are clearly unmet — examples of FAIL (false):
-- Role is built around a stack or specialty the candidate does not have (e.g. C++ low-latency / HFT / tick-data systems for someone without that craft)
-- Required degree, license, or years-in-specialty the candidate lacks when the posting treats it as essential
-- Professional experience in a specialized domain (e.g. automated trading systems) with no credible transfer from the profile
-- Multiple foundational must-haves missing (degree + Linux + git + domain experience) such that they are not a realistic hire for THIS posting
+CORE CRAFT FIT — PRIMARY ELIGIBILITY (AI judgment, not keyword matching):
 
-skillRequirementMet=true is OK when:
-- Gaps are learnable nice-to-haves, tools they can pick up, or stretch items on an adjacent ladder move
-- Transferable strengths make contribution credible even if the title differs (Compliance → Risk/AML/Privacy)
+Decide ONE of:
+- "day_one": Same craft; they can deliver core duties immediately with existing evidence.
+- "with_ramp": Same craft; they can deliver core duties within ~90 days while learning tools/systems/processes on the job. KEEP the job.
+- "not_eligible": Wrong craft, or a true day-1 blocker (specialty they never practiced, essential license/credential/years with no equivalent evidence). HIDE the job.
+
+Consistency rules (critical):
+- If you would write that they "possess the core operational/leadership skills" or "could do this job with ramp" → coreCraftFit MUST be day_one or with_ramp — NEVER not_eligible.
+- Missing tools/systems (WMS, Excel, reporting screens, a specific ERP module used as a warehouse tool) while the craft is floor ops / supervision / inventory → almost always with_ramp, NOT not_eligible.
+- Specialty craft that IS the job (S&OP design, demand planning lead, ERP implementation lead, international transport network design) with no CV evidence → not_eligible.
+- Posting says "we train" / "nice to have" / junior on a tool → with_ramp or day_one.
+- Mild team-size step-up on the same craft → with_ramp (or day_one), not not_eligible.
+- skillRequirementMet MUST equal (coreCraftFit !== "not_eligible").
+
+For EVERY material gap, classify learnability (for UI + learningScore):
+- "must_have": Only when coreCraftFit=not_eligible for that gap (true day-1 blocker).
+- "learn_on_job": Expected ramp while doing core work. Use this when coreCraftFit=with_ramp.
+- "nice_to_have": Preference / plus only.
+
+Judgment examples (teach the distinction — do not pattern-match keywords):
+- Warehouse Supervisor / Teamleider: core = floor leadership + inventory ops; advanced WMS mentioned → coreCraftFit=with_ramp, WMS=learn_on_job. KEEP.
+- Same title but hire must LEAD a greenfield SAP/WMS program as the main job with no ops leadership overlap → coreCraftFit=not_eligible.
+- Supply chain / S&OP / demand planning where those ARE the job and CV is hands-on warehouse only → not_eligible.
+- Posting says planning/ERP "nice to have" or "we train" → with_ramp or day_one.
 
 missingSkills rules:
-- List every material gap.
-- isHardRequirement=true for each gap that alone (or together) drives skillRequirementMet=false
-- isHardRequirement=false for soft/stretch gaps only
-- If skillRequirementMet=false, at least one missingSkills entry MUST have isHardRequirement=true
-- skillNotes: 1 sentence explaining the eligibility decision
+- List every material gap with learnability on EACH entry.
+- isHardRequirement must equal (learnability === "must_have").
+- If coreCraftFit=not_eligible, ≥1 entry MUST be learnability="must_have".
+- If coreCraftFit=day_one or with_ramp, NO entry may be learnability="must_have" (use learn_on_job / nice_to_have).
+- skillNotes: 1 sentence matching coreCraftFit (never say "can do the job" while setting not_eligible).
 
 employerType: short label from the posting.
 
@@ -181,7 +221,7 @@ Return ONLY valid JSON:
   "moneyScore": 0-100,
   "scopeIncrease": 0-100,
   "strengths": ["string"],
-  "missingSkills": [{ "skill": "string", "isHardRequirement": true/false }],
+  "missingSkills": [{ "skill": "string", "learnability": "must_have" | "learn_on_job" | "nice_to_have", "isHardRequirement": true/false }],
   "applyRecommendation": true/false,
   "reasoning": "2-4 sentences on ladder/scope angle",
   "contributionNotes": "1-2 sentences",
@@ -193,6 +233,10 @@ Return ONLY valid JSON:
   "requiredLanguages": ["string"],
   "languageRequirementMet": true/false,
   "languageNotes": "1 sentence on language eligibility",
+  "commuteRequirementMet": true/false,
+  "commuteNotes": "1 sentence on commute eligibility",
+  "estimatedCommuteMinutes": number or omit,
+  "coreCraftFit": "day_one" | "with_ramp" | "not_eligible",
   "skillRequirementMet": true/false,
   "skillNotes": "1 sentence on skill/credential eligibility",
   "pathType": "step" | "stretch" | "destination" | "lateral",
@@ -225,15 +269,17 @@ function coercePathType(raw: unknown): JobPathType {
   return "step";
 }
 
-/** Mildly prefer scope climbs over lateral clones after AI scoring. */
+/** Mildly prefer scope climbs over lateral clones after AI scoring — only when contribution is credible. */
 function applyLadderFitBias(
   fitScore: number,
   scopeIncrease: number,
-  pathType: JobPathType
+  pathType: JobPathType,
+  contributionScore: number
 ): number {
+  if (contributionScore < 55) return clampScore(fitScore);
   let score = fitScore;
   if (pathType === "lateral" && scopeIncrease < 40) {
-    score = Math.round(score * 0.9);
+    score = Math.round(score * 0.85);
   } else if (
     (pathType === "step" || pathType === "destination") &&
     scopeIncrease >= 55
@@ -247,50 +293,122 @@ function applyLadderFitBias(
 
 function normalizeMatchResult(
   result: JobMatchResult,
-  hasPrefs: boolean
+  hasPrefs: boolean,
+  commute: {
+    commuteRequirementMet: boolean;
+    commuteNotes: string;
+    estimatedCommuteMinutes?: number;
+  }
 ): JobMatchResult {
   const scopeIncrease = clampScore(result.scopeIncrease, 40);
   const pathType = coercePathType(result.pathType);
+  const contributionScore = clampScore(result.contributionScore);
   const fitScore = applyLadderFitBias(
     clampScore(result.fitScore),
     scopeIncrease,
-    pathType
+    pathType,
+    contributionScore
   );
 
-  const missingSkills = Array.isArray(result.missingSkills)
+  let missingSkills = Array.isArray(result.missingSkills)
     ? result.missingSkills
-        .map((s) => ({
-          skill: String(s.skill ?? "").trim(),
-          isHardRequirement: Boolean(s.isHardRequirement),
-        }))
-        .filter((s) => s.skill)
+        .map((s) =>
+          toMissingSkill({
+            skill: String(s.skill ?? ""),
+            learnability: (s as { learnability?: GapLearnability }).learnability,
+            isHardRequirement: Boolean(
+              (s as { isHardRequirement?: boolean }).isHardRequirement
+            ),
+          })
+        )
+        .filter((s): s is NonNullable<typeof s> => !!s)
     : [];
 
-  // AI skill gate — also fail if any skill was flagged hard.
-  let skillRequirementMet = Boolean(result.skillRequirementMet);
-  if (hasUnmetHardRequirements(missingSkills)) {
-    skillRequirementMet = false;
+  // Primary gate: AI coreCraftFit. Align skillRequirementMet + gap labels with it.
+  let coreCraftFit: CoreCraftFit =
+    normalizeCoreCraftFit(result.coreCraftFit) ??
+    (result.skillRequirementMet === false ||
+    hasUnmetHardRequirements(missingSkills)
+      ? "not_eligible"
+      : missingSkills.some((s) => s.learnability === "learn_on_job")
+        ? "with_ramp"
+        : "day_one");
+
+  if (coreCraftFit === "day_one" || coreCraftFit === "with_ramp") {
+    // Craft transfers — never hide for tool/process gaps the model over-labeled.
+    missingSkills = missingSkills.map((s) =>
+      s.learnability === "must_have"
+        ? {
+            ...s,
+            learnability: "learn_on_job" as const,
+            isHardRequirement: false,
+          }
+        : s
+    );
+    if (
+      coreCraftFit === "with_ramp" &&
+      !missingSkills.some((s) => s.learnability === "learn_on_job")
+    ) {
+      // Keep with_ramp semantics even if the model listed no gaps.
+    }
+  }
+
+  const skillRequirementMet = coreCraftFit !== "not_eligible";
+
+  const learnOnJobCount = missingSkills.filter(
+    (s) => s.learnability === "learn_on_job"
+  ).length;
+
+  let contributionOut = contributionScore;
+  if (!skillRequirementMet) {
+    contributionOut = Math.min(contributionOut, 45);
+  }
+
+  let learningOut = clampScore(result.learningScore);
+  if (
+    skillRequirementMet &&
+    (learnOnJobCount > 0 || coreCraftFit === "with_ramp")
+  ) {
+    learningOut = Math.max(
+      learningOut,
+      Math.min(100, 55 + Math.max(learnOnJobCount, 1) * 8)
+    );
   }
 
   let fitOut = fitScore;
+  // Contribution is primary — learning/scope cannot inflate far above ability to deliver.
+  fitOut = Math.min(fitOut, contributionOut + 15);
   if (!skillRequirementMet) {
     fitOut = Math.min(fitOut, 40);
   }
+  if (!commute.commuteRequirementMet) {
+    fitOut = Math.min(fitOut, 35);
+  }
+
+  const applyRecommendation =
+    Boolean(result.applyRecommendation) &&
+    skillRequirementMet &&
+    commute.commuteRequirementMet &&
+    !isSkillIneligible({ skillRequirementMet, coreCraftFit, missingSkills }) &&
+    fitOut >= 50 &&
+    pathType !== "lateral";
 
   return {
     ...result,
     fitScore: fitOut,
-    contributionScore: clampScore(result.contributionScore),
-    learningScore: clampScore(result.learningScore),
+    contributionScore: contributionOut,
+    learningScore: learningOut,
     moneyScore: clampScore(result.moneyScore, 50),
     scopeIncrease,
     strengths: Array.isArray(result.strengths) ? result.strengths : [],
-    missingSkills,
-    applyRecommendation:
-      Boolean(result.applyRecommendation) &&
-      skillRequirementMet &&
-      !isSkillIneligible({ skillRequirementMet, missingSkills }) &&
-      fitOut >= 50,
+    missingSkills: missingSkills.map((s) => ({
+      skill: s.skill,
+      learnability:
+        s.learnability ??
+        (s.isHardRequirement ? ("must_have" as const) : ("nice_to_have" as const)),
+      isHardRequirement: s.isHardRequirement,
+    })),
+    applyRecommendation,
     contributionNotes: result.contributionNotes?.trim() || "",
     learningNotes: result.learningNotes?.trim() || "",
     moneyNotes: result.moneyNotes?.trim() || "",
@@ -308,8 +426,12 @@ function normalizeMatchResult(
       : [],
     languageRequirementMet: Boolean(result.languageRequirementMet),
     languageNotes: result.languageNotes?.trim() || "",
+    coreCraftFit,
     skillRequirementMet,
     skillNotes: result.skillNotes?.trim() || "",
+    commuteRequirementMet: commute.commuteRequirementMet,
+    commuteNotes: commute.commuteNotes,
+    estimatedCommuteMinutes: commute.estimatedCommuteMinutes,
     pathType,
     ladderPath: result.ladderPath?.trim() || "",
     matchedDestination: result.matchedDestination?.trim() || undefined,
@@ -345,7 +467,15 @@ ${postingText.slice(0, 14000)}`;
       coerce: normalizeJobMatch,
     }
   );
-  return normalizeMatchResult(result, hasPrefs);
+  const commute = await screenCommute({
+    profile: context.profile,
+    jobLocation: listing.location,
+    postingText,
+    aiCommuteRequirementMet: result.commuteRequirementMet,
+    aiEstimatedCommuteMinutes: result.estimatedCommuteMinutes,
+    aiCommuteNotes: result.commuteNotes,
+  });
+  return normalizeMatchResult(result, hasPrefs, commute);
 }
 
 export async function matchJobToCandidate(job: Job, context: CandidateContext) {
@@ -367,5 +497,13 @@ export async function matchJobToCandidate(job: Job, context: CandidateContext) {
       coerce: normalizeJobMatch,
     }
   );
-  return normalizeMatchResult(result, hasPrefs);
+  const commute = await screenCommute({
+    profile: context.profile,
+    jobLocation: job.location,
+    postingText: `${job.description}\n${[...(job.requirements?.required ?? []), ...(job.requirements?.preferred ?? [])].map((r) => r.skill).join("\n")}`,
+    aiCommuteRequirementMet: result.commuteRequirementMet,
+    aiEstimatedCommuteMinutes: result.estimatedCommuteMinutes,
+    aiCommuteNotes: result.commuteNotes,
+  });
+  return normalizeMatchResult(result, hasPrefs, commute);
 }

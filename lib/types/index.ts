@@ -1,6 +1,7 @@
 import type { Timestamp } from "firebase-admin/firestore";
 
 export type WorkPreference = "remote" | "hybrid" | "onsite" | "any";
+export type CommuteMode = "car" | "bike" | "public_transit" | "walk";
 export type ExperienceLevel = "junior" | "mid" | "senior" | "staff" | "principal";
 export type ApplicationStatus =
   | "draft"
@@ -62,6 +63,8 @@ export interface UserSettings {
   fitScoreThreshold: number;
   autoApply: boolean;
   jobBoards?: JobBoard[];
+  /** Auto-detect or force language for job-board keyword searches. */
+  jobSearchLanguage?: JobSearchLanguageSetting;
   /** Playwright browse URLs — use {query} as search placeholder */
   playwrightJobSearchUrls?: string[];
   /** Company career page URLs to crawl */
@@ -92,6 +95,12 @@ export interface UserProfile {
   jobPreferences?: string;
   /** Languages the candidate speaks (e.g. English, Dutch). Used as a hard job-eligibility filter. */
   languagesSpoken?: string[];
+  /** Home base for commute screening (city or address, e.g. "Baarn, Netherlands"). */
+  homeLocation?: string;
+  /** Preferred commute mode when evaluating on-site/hybrid roles. */
+  commuteMode?: CommuteMode;
+  /** Max one-way commute minutes; null = no limit; undefined = not configured. */
+  commuteMaxMinutes?: number | null;
   resume?: {
     storagePath: string;
     fileName: string;
@@ -191,6 +200,40 @@ export interface CandidateProject {
   source: "resume" | "portfolio" | "github" | "linkedin";
 }
 
+/** AI suggestion for a credential that aids the next ladder move. */
+export type EducationRecommendationType =
+  | "certification"
+  | "course"
+  | "degree"
+  | "license"
+  | "training";
+
+export type EducationRecommendationHorizon = "near" | "stretch";
+
+export interface EducationRecommendation {
+  /** Short name, e.g. "VCA Basis" or "APICS CSCP" */
+  title: string;
+  type: EducationRecommendationType;
+  /** Provider or typical issuer when known (AI judgment) */
+  provider?: string;
+  /** Why this helps THIS candidate climb */
+  rationale: string;
+  /** Gaps / skills this closes (from ladder, matches, or market) */
+  closesGaps: string[];
+  /** Ladder roles this unlocks or strengthens */
+  targetsLadderRoles: string[];
+  /** 1 = highest priority */
+  priority: number;
+  horizon: EducationRecommendationHorizon;
+  /**
+   * Where the signal came from — AI may combine sources.
+   * market = observed in matched job postings; ladder = destination gaps; knowledge = domain norms.
+   */
+  evidenceSources: Array<"market" | "ladder" | "profile" | "knowledge">;
+  /** Optional: how often this showed up across matched jobs */
+  marketSignalCount?: number;
+}
+
 export interface CandidateProfile {
   userId: string;
   skills: string[];
@@ -202,6 +245,14 @@ export interface CandidateProfile {
   experienceLevel: ExperienceLevel;
   strengths: string[];
   gaps: string[];
+  /**
+   * AI-ranked next certifications / courses / education that unlock ladder climbs,
+   * informed by CV + market gaps from matched jobs.
+   */
+  educationRecommendations?: EducationRecommendation[];
+  /** One-line AI strategy for the education path */
+  educationRecommendationsSummary?: string;
+  educationRecommendationsGeneratedAt?: string;
   sources: {
     resume: boolean;
     portfolio: boolean;
@@ -234,14 +285,31 @@ export interface Job {
     required: JobRequirement[];
     preferred: JobRequirement[];
   };
+  /** Language the listing text is written in (not spoken-language requirements). */
+  listingLanguage?: CoverLetterLanguage;
   extractedSkills: string[];
   discoveredVia: string[];
   discoveredAt: string;
   status: "discovered" | "matched" | "archived";
 }
 
+export type GapLearnability = "must_have" | "learn_on_job" | "nice_to_have";
+
+/**
+ * AI primary eligibility for showing a job:
+ * day_one / with_ramp = keep; not_eligible = hide (wrong craft or impossible day-1 bar).
+ */
+export type CoreCraftFit = "day_one" | "with_ramp" | "not_eligible";
+
 export interface MissingSkill {
   skill: string;
+  /**
+   * AI judgment: must_have = day-1 non-negotiable (hide job if unmet);
+   * learn_on_job = expected ramp while doing core work; nice_to_have = preference only.
+   * Optional on older saved matches — fall back to isHardRequirement.
+   */
+  learnability?: GapLearnability;
+  /** Derived: true when learnability === "must_have" (backward compatible). */
   isHardRequirement: boolean;
 }
 
@@ -281,6 +349,13 @@ export interface JobMatch {
    */
   skillRequirementMet?: boolean;
   skillNotes?: string;
+  /** AI judgment of same-craft day-1 / ramp eligibility (primary skill gate). */
+  coreCraftFit?: CoreCraftFit;
+  /** Whether commute fits profile limits (hard gate when max minutes set). */
+  commuteRequirementMet?: boolean;
+  commuteNotes?: string;
+  /** One-way commute estimate in minutes when known. */
+  estimatedCommuteMinutes?: number;
   /**
    * Scope step-up vs current role (0-100): team size, budget, stakeholders,
    * decision rights, market size, IC→lead — not title synonymy.
@@ -297,6 +372,9 @@ export interface JobMatch {
 }
 
 export type CoverLetterLanguage = "en" | "nl";
+
+/** Auto-detect or force language for job-board keyword searches. */
+export type JobSearchLanguageSetting = "auto" | CoverLetterLanguage;
 
 export interface CoverLetterRequirementMatch {
   requirement: string;

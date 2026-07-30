@@ -22,3 +22,36 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
   overflow-x: hidden;
 }
+
+@keyframes landing-drift {
+  0%,
+  100% {
+    transform: scale(1.05) translate(0, 0);
+  }
+  50% {
+    transform: scale(1.1) translate(-1.5%, 1%);
+  }
+}
+
+@keyframes landing-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.landing-hero-media {
+  animation: landing-drift 28s ease-in-out infinite;
+}
+
+.landing-hero-copy {
+  animation: landing-fade-in 900ms ease both;
+}
+
+.landing-hero-cta {
+  animation: landing-fade-in 900ms ease 180ms both;
+}

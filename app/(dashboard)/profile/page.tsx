@@ -717,6 +717,84 @@ export default function ProfilePage() {
           )}
         </Card>
 
+        <Card className="lg:col-span-2">
+          <CardTitle>Next certifications & education</CardTitle>
+          {candidate?.educationRecommendations?.length ? (
+            <div className="mt-4 space-y-3">
+              {candidate.educationRecommendationsSummary && (
+                <p className="text-sm text-zinc-600">
+                  {candidate.educationRecommendationsSummary}
+                </p>
+              )}
+              <ul className="space-y-3">
+                {candidate.educationRecommendations.map((rec) => (
+                  <li
+                    key={`${rec.priority}-${rec.title}`}
+                    className="rounded-lg border border-zinc-100 px-3 py-2.5 text-sm"
+                  >
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium uppercase text-zinc-600">
+                        #{rec.priority}
+                      </span>
+                      <span className="font-medium">{rec.title}</span>
+                      <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium uppercase text-indigo-800">
+                        {rec.type}
+                      </span>
+                      <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium uppercase text-sky-800">
+                        {rec.horizon}
+                      </span>
+                      {rec.provider && (
+                        <span className="text-xs text-zinc-500">{rec.provider}</span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-600">{rec.rationale}</p>
+                    {rec.closesGaps.length > 0 && (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Closes: {rec.closesGaps.join("; ")}
+                      </p>
+                    )}
+                    {rec.targetsLadderRoles.length > 0 && (
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        Targets: {rec.targetsLadderRoles.join("; ")}
+                      </p>
+                    )}
+                    <p className="mt-1 text-[10px] uppercase tracking-wide text-zinc-400">
+                      {rec.evidenceSources
+                        .map((s) =>
+                          s === "market"
+                            ? "from jobs found"
+                            : s === "ladder"
+                              ? "ladder"
+                              : s === "profile"
+                                ? "profile"
+                                : "industry knowledge"
+                        )
+                        .join(" · ")}
+                      {typeof rec.marketSignalCount === "number" &&
+                      rec.marketSignalCount > 0
+                        ? ` · seen in ${rec.marketSignalCount} jobs`
+                        : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-zinc-400">
+                AI combines your ladder, industry knowledge, and requirements from
+                matched jobs. Refreshes after Re-analyze and Find Jobs.
+              </p>
+            </div>
+          ) : isProcessing ? (
+            <p className="mt-4 flex items-center gap-2 text-sm text-zinc-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Suggesting credentials…
+            </p>
+          ) : (
+            <p className="mt-4 text-sm text-zinc-500">
+              Re-analyze or Find Jobs so AI can suggest certifications that unlock
+              your next roles — using your ladder and what employers ask for.
+            </p>
+          )}
+        </Card>
+
         <Card>
           <CardTitle>Inferred roles</CardTitle>
           {candidate?.inferredRoles?.length ? (

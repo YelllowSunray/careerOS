@@ -19,7 +19,8 @@ export async function searchLinkedInGuestApi(
   userId?: string,
   experienceLevel?: ExperienceLevel,
   start = 0,
-  workPreference = "any"
+  workPreference = "any",
+  locale = "en-US"
 ): Promise<DiscoveredJobListing[]> {
   const expFilter = experienceLevel
     ? linkedInExperienceFilter(experienceLevel)
@@ -37,6 +38,7 @@ export async function searchLinkedInGuestApi(
     const res = await fetch(url, {
       headers: {
         "User-Agent": BROWSER_UA,
+        "Accept-Language": `${locale},en;q=0.8`,
       },
       signal: AbortSignal.timeout(15000),
     });
@@ -99,6 +101,7 @@ export async function searchJobBoardsHttp(
     workPreference: string;
     experienceLevel?: ExperienceLevel;
     start?: number;
+    locale?: string;
   }
 ): Promise<DiscoveredJobListing[]> {
   const location = resolveLinkedInLocation(
@@ -106,6 +109,7 @@ export async function searchJobBoardsHttp(
     profile.workPreference
   );
   const start = Math.max(0, profile.start ?? 0);
+  const locale = profile.locale ?? "en-US";
   const results: DiscoveredJobListing[] = [];
 
   if (boards.includes("indeed")) {
@@ -130,7 +134,8 @@ export async function searchJobBoardsHttp(
         userId,
         profile.experienceLevel,
         start,
-        profile.workPreference
+        profile.workPreference,
+        locale
       ))
     );
   }

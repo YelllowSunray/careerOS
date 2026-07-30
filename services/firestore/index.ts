@@ -26,6 +26,8 @@ export const COLLECTIONS = {
   workflows: "workflows",
   browserSessions: "browserSessions",
   linkedInProfiles: "linkedInProfiles",
+  /** Persists evaluated listing keys across pause/restart until Clear Results. */
+  jobSearchState: "jobSearchState",
 } as const;
 
 const db = () => getAdminFirestore();
@@ -125,10 +127,58 @@ export async function clearUserJobSearchResults(userId: string): Promise<void> {
   jobsSnap.docs.forEach((doc) => batch.delete(doc.ref));
   matchesSnap.docs.forEach((doc) => batch.delete(doc.ref));
   appsSnap.docs.forEach((doc) => batch.delete(doc.ref));
+  // Reset evaluated-listing memory so the next search may re-open rejects/accepts.
+  batch.delete(db().collection(COLLECTIONS.jobSearchState).doc(userId));
 
-  if (!jobsSnap.empty || !matchesSnap.empty || !appsSnap.empty) {
-    await batch.commit();
+  await batch.commit();
+}
+
+export interface JobSearchState {
+  userId: string;
+  /** Listing identity keys already matched or rejected — skip until Clear. */
+  evaluatedListingKeys: string[];
+  updatedAt: string;
+}
+
+export async function getJobSearchState(
+  userId: string
+): Promise<JobSearchState | null> {
+  const snap = await db()
+    .collection(COLLECTIONS.jobSearchState)
+    .doc(userId)
+    .get();
+  return snap.exists ? (snap.data() as JobSearchState) : null;
+}
+
+export async function saveJobSearchState(
+  state: JobSearchState
+): Promise<void> {
+  await setDoc(COLLECTIONS.jobSearchState, state.userId, state);
+}
+
+/** Merge newly decided listing keys into durable search memory (until Clear). */
+export async function mergeEvaluatedListingKeys(
+  userId: string,
+  keys: string[]
+): Promise<string[]> {
+  if (keys.length === 0) {
+    const existing = await getJobSearchState(userId);
+    return existing?.evaluatedListingKeys ?? [];
   }
+  const existing = await getJobSearchState(userId);
+  const merged = [...(existing?.evaluatedListingKeys ?? [])];
+  const seen = new Set(merged);
+  for (const key of keys) {
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(key);
+  }
+  await saveJobSearchState({
+    userId,
+    evaluatedListingKeys: merged,
+    updatedAt: new Date().toISOString(),
+  });
+  return merged;
 }
 
 export async function getJobs(userId: string): Promise<Job[]> {

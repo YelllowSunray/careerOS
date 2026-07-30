@@ -13,6 +13,7 @@ import {
   formValuesToProfileUpdate,
   type ProfileFormValues,
 } from "./profile-form";
+import { commuteModeLabel } from "@/lib/commute/helpers";
 
 interface ProfileDetailsCardProps {
   profile: UserProfile;
@@ -108,6 +109,23 @@ export function ProfileDetailsCard({
               {(profile.languagesSpoken ?? []).length > 0
                 ? profile.languagesSpoken!.join(", ")
                 : "—"}
+            </dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-sm text-zinc-500">Commute</dt>
+            <dd className="mt-1 text-sm">
+              {profile.homeLocation && profile.commuteMode ? (
+                <>
+                  From {profile.homeLocation} by {commuteModeLabel(profile.commuteMode)}
+                  {profile.commuteMaxMinutes === null
+                    ? " · no time limit"
+                    : typeof profile.commuteMaxMinutes === "number"
+                      ? ` · max ${profile.commuteMaxMinutes} min one-way`
+                      : ""}
+                </>
+              ) : (
+                "—"
+              )}
             </dd>
           </div>
           <div className="sm:col-span-2">
@@ -239,6 +257,64 @@ export function ProfileDetailsCard({
             />
             <p className="mt-1 text-xs text-zinc-500">
               Comma-separated. Jobs that require a language you do not speak will be hidden.
+            </p>
+          </div>
+          <div className="sm:col-span-2">
+            <Label htmlFor="edit-home">Home base (for commute)</Label>
+            <Input
+              id="edit-home"
+              value={form.homeLocation}
+              onChange={(e) => update("homeLocation", e.target.value)}
+              placeholder="Baarn, Netherlands"
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="edit-commute-mode">Commute mode</Label>
+            <select
+              id="edit-commute-mode"
+              value={form.commuteMode}
+              onChange={(e) => update("commuteMode", e.target.value)}
+              className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
+            >
+              <option value="">Not set</option>
+              <option value="car">Car</option>
+              <option value="bike">Bike</option>
+              <option value="public_transit">Public transport</option>
+              <option value="walk">Walking</option>
+            </select>
+          </div>
+          <div>
+            <Label htmlFor="edit-commute-max">Max one-way commute</Label>
+            <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                id="edit-commute-max"
+                type="number"
+                min={1}
+                value={form.commuteMaxMinutes}
+                onChange={(e) => update("commuteMaxMinutes", e.target.value)}
+                placeholder="30"
+                disabled={form.commuteNoLimit}
+                className="sm:max-w-[8rem]"
+              />
+              <label className="flex items-center gap-2 text-sm text-zinc-600">
+                <input
+                  type="checkbox"
+                  checked={form.commuteNoLimit}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      commuteNoLimit: e.target.checked,
+                      commuteMaxMinutes: e.target.checked ? "" : prev.commuteMaxMinutes,
+                    }))
+                  }
+                  className="rounded border-zinc-300"
+                />
+                No limit
+              </label>
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">
+              Jobs requiring regular on-site attendance beyond this commute will be hidden. Set home + mode + minutes, or choose no limit.
             </p>
           </div>
           <div className="sm:col-span-2">
