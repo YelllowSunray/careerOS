@@ -62,6 +62,7 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [threshold, setThreshold] = useState(85);
   const [autoApply, setAutoApply] = useState(false);
+  const [showStretchTargets, setShowStretchTargets] = useState(true);
   const [jobBoards, setJobBoards] = useState<BoardState>(
     boardsToState(["linkedin", "indeed"])
   );
@@ -76,6 +77,7 @@ export default function SettingsPage() {
         setProfile(p);
         setThreshold(p?.settings?.fitScoreThreshold ?? 85);
         setAutoApply(p?.settings?.autoApply ?? false);
+        setShowStretchTargets(p?.settings?.showStretchTargets !== false);
         const boards = p?.settings?.jobBoards ?? ["linkedin", "indeed"];
         setJobBoards(boardsToState(boards));
         setPlaywrightUrls(urlsToLines(p?.settings?.playwrightJobSearchUrls));
@@ -99,8 +101,10 @@ export default function SettingsPage() {
         body: JSON.stringify({
           ...profile,
           settings: {
+            ...profile.settings,
             fitScoreThreshold: threshold,
             autoApply,
+            showStretchTargets,
             jobBoards: selectedBoards,
             playwrightJobSearchUrls: linesToUrls(playwrightUrls),
             careerPageUrls: linesToUrls(careerUrls),
@@ -149,12 +153,29 @@ export default function SettingsPage() {
           />
           <Label htmlFor="autoApply">Auto-apply to recommended jobs (experimental)</Label>
         </div>
+        <div className="mt-4 flex items-start gap-2">
+          <input
+            id="showStretch"
+            type="checkbox"
+            checked={showStretchTargets}
+            onChange={(e) => setShowStretchTargets(e.target.checked)}
+            className="mt-1 rounded"
+          />
+          <Label htmlFor="showStretch">
+            Show stretch dream matches
+            <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+              When on, enabled dream/target roles that fail hard craft gates are
+              still saved with gap chips instead of hidden.
+            </span>
+          </Label>
+        </div>
       </Card>
 
       <Card>
         <CardTitle>Job discovery</CardTitle>
         <p className="mt-1 text-sm text-zinc-500">
-          AI searches job boards using your top 3 inferred roles, then reads each listing against your full resume and portfolio to find ideal matches.
+          AI searches using your Dream / Bridge lanes (and target roles), then
+          scores each listing against your resume, portfolio, and career intent.
         </p>
 
         <div className="mt-6 space-y-2">

@@ -10,6 +10,7 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
+  MessageCircle,
   Settings,
   Shield,
   User,
@@ -17,6 +18,7 @@ import {
 
 const NAV = [
   { href: "/profile", label: "Profile", icon: User },
+  { href: "/intake", label: "Career chat", icon: MessageCircle },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/applications", label: "Applications", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },

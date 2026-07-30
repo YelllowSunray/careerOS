@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { ProfileDetailsCard } from "@/components/profile/profile-details-card";
 import { TargetRolesSection } from "@/components/profile/target-roles-section";
+import { CareerIntentCard } from "@/components/profile/career-intent-card";
 import type { UserProfile, CandidateProfile, ResumeData, Workflow, FeedbackPreferenceState } from "@/lib/types";
 import type { AiUsageRecord } from "@/lib/types/ai-usage";
 import {
@@ -357,35 +358,6 @@ export default function ProfilePage() {
     );
   }
 
-  if (profile && !profile.careerIntent) {
-    return (
-      <div className="mx-auto max-w-lg py-20 text-center">
-        <h1 className="text-2xl font-semibold">Career conversation</h1>
-        <p className="mt-2 text-zinc-500">
-          Tell Career OS what you want to become — we&apos;ll build Dream, Bridge,
-          and Never search lanes before hunting jobs.
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <Link href="/intake">
-            <Button>Start conversation</Button>
-          </Link>
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              await apiFetch("/api/intake/chat", {
-                method: "POST",
-                body: JSON.stringify({ action: "skip" }),
-              });
-              await loadData();
-            }}
-          >
-            Skip for now
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   const hasRawResume = (resume?.rawText?.trim().length ?? 0) > 0;
   const summaryStepFailed = workflow?.steps?.some(
     (s) => s.name === "candidate_profile" && s.status === "failed"
@@ -402,6 +374,32 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-6 sm:space-y-8">
+      {!profile.careerIntent && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          <p className="font-medium">Career conversation recommended</p>
+          <p className="mt-1 text-sky-800">
+            Tell Career OS your hopes and anti-goals, or edit Dream / Bridge /
+            Never below. You can also skip and fill the form manually.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link href="/intake">
+              <Button>Start conversation</Button>
+            </Link>
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                await apiFetch("/api/intake/chat", {
+                  method: "POST",
+                  body: JSON.stringify({ action: "skip" }),
+                });
+                await loadData();
+              }}
+            >
+              Skip — use form only
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Profile</h1>
@@ -454,6 +452,8 @@ export default function ProfilePage() {
           isProcessing={isProcessing}
           onSave={handleSaveProfile}
         />
+
+        <CareerIntentCard profile={profile} onSave={handleSaveProfile} />
 
         <Card>
           <CardTitle className="flex items-center gap-2">
@@ -948,60 +948,6 @@ export default function ProfilePage() {
             <p className="mt-4 text-sm text-zinc-500">
               Re-analyze or Find Jobs so AI can suggest certifications that unlock
               your next roles — using your ladder and what employers ask for.
-            </p>
-          )}
-        </Card>
-
-        <Card>
-          <CardTitle>Career intent</CardTitle>
-          {profile.careerIntent ? (
-            <div className="mt-4 space-y-2 text-sm text-zinc-700">
-              <p>
-                <span className="font-medium">North star:</span>{" "}
-                {profile.careerIntent.northStar}
-              </p>
-              <p className="text-zinc-600">{profile.careerIntent.narrative}</p>
-              <p className="text-xs text-zinc-500">
-                {profile.careerIntent.workSetting} · stretch{" "}
-                {profile.careerIntent.stretchTolerance} · source{" "}
-                {profile.careerIntent.source}
-              </p>
-              {profile.searchStrategy && (
-                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
-                  <div>
-                    <p className="font-medium text-emerald-800">Dream</p>
-                    <p className="text-zinc-600">
-                      {profile.searchStrategy.dream.join(", ") || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-sky-800">Bridge</p>
-                    <p className="text-zinc-600">
-                      {profile.searchStrategy.bridge.join(", ") || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-rose-800">Never</p>
-                    <p className="text-zinc-600">
-                      {profile.searchStrategy.never.join(", ") || "—"}
-                    </p>
-                  </div>
-                </div>
-              )}
-              <Link
-                href="/intake"
-                className="inline-block text-xs font-medium text-zinc-900 underline"
-              >
-                Continue conversation
-              </Link>
-            </div>
-          ) : (
-            <p className="mt-4 text-sm text-zinc-500">
-              No intent yet.{" "}
-              <Link href="/intake" className="underline">
-                Start the career conversation
-              </Link>
-              .
             </p>
           )}
         </Card>
