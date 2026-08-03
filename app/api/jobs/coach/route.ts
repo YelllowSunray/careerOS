@@ -86,7 +86,10 @@ export async function POST(request: NextRequest) {
       ].slice(0, 12),
       workSetting: patch.workSetting ?? baseIntent?.workSetting ?? "flexible",
       horizon: baseIntent?.horizon ?? { now: [], sixMonths: [], twoYears: [] },
-      stretchTolerance: baseIntent?.stretchTolerance ?? "show_stretch",
+      stretchTolerance:
+        patch.stretchTolerance ??
+        baseIntent?.stretchTolerance ??
+        "show_stretch",
       moneyFloor: baseIntent?.moneyFloor,
       nonNegotiables: baseIntent?.nonNegotiables ?? [],
       openQuestions: patch.openQuestions ?? baseIntent?.openQuestions ?? [],

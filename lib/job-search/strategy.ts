@@ -234,6 +234,7 @@ export function applyDreamStretchIfNeeded<T extends {
   >
 ): T {
   if (!showStretchTargetsEnabled(profile)) return match;
+  if (match.pathType === "regressive") return match;
   if (match.coreCraftFit !== "not_eligible" && match.skillRequirementMet !== false) {
     return match;
   }

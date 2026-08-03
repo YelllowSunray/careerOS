@@ -42,6 +42,10 @@ import {
 import { formatCommuteMatchLine } from "@/lib/commute/helpers";
 import { groupJobsByLocationClump } from "@/lib/job-search/location-clump";
 import { JobFeedbackFlow } from "@/components/jobs/job-feedback-flow";
+import {
+  formatNorthStarForUi,
+  PATH_TYPE_LABELS,
+} from "@/lib/career/ethos";
 
 const JOB_PATH_FILTERS_KEY = "career_os_jobs_path_filters";
 
@@ -156,6 +160,7 @@ export default function JobsPage() {
     UserProfile,
     "homeLocation" | "commuteMode" | "commuteMaxMinutes"
   > | null>(null);
+  const [northStar, setNorthStar] = useState<string | null>(null);
   const [jobsTab, setJobsTab] = useState<"matches" | "feedback">("matches");
   const [groupByLocation, setGroupByLocation] = useState(false);
   const [showStretch, setShowStretch] = useState(false);
@@ -214,10 +219,19 @@ export default function JobsPage() {
           commuteMode: profile.commuteMode,
           commuteMaxMinutes: profile.commuteMaxMinutes,
         });
+        setNorthStar(
+          formatNorthStarForUi(
+            profile.careerIntent?.northStar ||
+              profile.targetRoles?.primary ||
+              null
+          )
+        );
         // Dream-target stretch saves should be visible when stretch mode is on (default).
         if (profile.settings?.showStretchTargets !== false) {
           setShowStretch(true);
         }
+      } else {
+        setNorthStar(null);
       }
       if (profile?.settings?.jobSearchLanguage) {
         setSearchLanguage(profile.settings.jobSearchLanguage);
@@ -473,6 +487,7 @@ export default function JobsPage() {
       return false;
     }
     const match = matchMap.get(job.id);
+    if (match?.pathType === "regressive") return false;
     if (match?.languageRequirementMet === false) return false;
     if (isSkillIneligible(match)) return false;
     if (isCommuteIneligible(match)) return false;
@@ -591,8 +606,14 @@ export default function JobsPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Jobs</h1>
           <p className="mt-1 text-sm text-zinc-500 sm:text-base">
-            AI searches against your career ladder destinations and scores scope step-ups, not just CV title clones.
+            Path toward your next dream role — footholds you can defend today, plus marked stretch when you allow it.
           </p>
+          {northStar && (
+            <p className="mt-2 text-sm text-zinc-800">
+              <span className="font-medium text-zinc-500">North star · </span>
+              {northStar}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           <div className="flex w-full flex-col gap-1 sm:w-auto">
@@ -726,12 +747,12 @@ export default function JobsPage() {
 
       {(Boolean(workflow?.config?.emptyFunnelActive) || coach?.active) && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
-          <p className="font-medium">Empty-funnel coach</p>
+          <p className="font-medium">Path coach</p>
           <p className="mt-1 text-sky-800">
             {coachLoading
-              ? "Diagnosing why nothing saved…"
+              ? "Diagnosing why the path is empty…"
               : coach?.diagnosis ||
-                "No new saves for a few rounds — switching toward bridge office roles while keeping your dream title."}
+                "No footholds saved for a few rounds — proposing bridge steps that still move toward your north star."}
           </p>
           {coach?.clarifyingQuestion && (
             <p className="mt-2 text-xs text-sky-700">
@@ -1271,10 +1292,17 @@ export default function JobsPage() {
                                     ? "bg-sky-400/20 text-sky-200"
                                     : match.pathType === "stretch"
                                       ? "bg-violet-400/20 text-violet-200"
-                                      : "bg-zinc-500/30 text-zinc-300"
+                                      : match.pathType === "regressive"
+                                        ? "bg-red-400/20 text-red-200"
+                                        : "bg-zinc-500/30 text-zinc-300"
                               }`}
+                              title={
+                                PATH_TYPE_LABELS[match.pathType]?.hint ||
+                                undefined
+                              }
                             >
-                              {match.pathType}
+                              {PATH_TYPE_LABELS[match.pathType]?.label ||
+                                match.pathType}
                             </span>
                           )}
                           {match.scopeIncrease != null && (

@@ -21,11 +21,16 @@ import {
   type SearchQueryPlan,
 } from "@/lib/job-search/locale";
 import { getEnabledTargetSearchQueries } from "@/lib/job-search/target-roles";
+import { ETHOS_AGENT_BLOCK } from "@/lib/career/ethos";
 import {
   getLaneQueries,
   laneQueriesToPlans,
   shouldUseStrategyLanes,
 } from "@/lib/job-search/strategy";
+import {
+  synthesizeBoardQueriesFromIntent,
+  fallbackBoardQueriesFromIntent,
+} from "@/lib/job-search/intent-queries";
 
 export type { SearchQueryPlan, SearchLanguageStrategy };
 
@@ -257,20 +262,49 @@ export async function generateTailoredSearchPlan(
   const heuristicLevel = inferExperienceLevelFromContext(context);
   const fallbackLang = resolveJobSearchLanguage(context, userSetting);
 
-  // Strategy / target / intent lanes — deterministic when available.
+  // Strategy / intent / targets — AI synthesizes board-ready queries (not raw dream sentences).
   if (shouldUseStrategyLanes(context.profile) || emptyFunnel) {
+    const synthesized = await synthesizeBoardQueriesFromIntent(context, {
+      emptyFunnel,
+      language: fallbackLang,
+      experienceLevel: heuristicLevel,
+    });
+    if (synthesized && synthesized.queryPlans.length >= 2) {
+      return finalizeSearchPlan(
+        synthesized.queryPlans,
+        heuristicLevel,
+        `${emptyFunnel ? "Empty-funnel · " : ""}${synthesized.rationale}`,
+        `Intent→board query language bias: ${fallbackLang}`,
+        userSetting
+      );
+    }
+
+    const fallbackPlans = fallbackBoardQueriesFromIntent(context, {
+      emptyFunnel,
+      language: fallbackLang,
+    });
+    if (fallbackPlans.length >= 2) {
+      return finalizeSearchPlan(
+        fallbackPlans,
+        heuristicLevel,
+        emptyFunnel
+          ? `Empty-funnel fallback lanes: ${fallbackPlans.map((p) => p.query).join(", ")}`
+          : `Sanitized strategy/target lanes: ${fallbackPlans.map((p) => p.query).join(", ")}`,
+        `Lane language bias: ${fallbackLang}`,
+        userSetting
+      );
+    }
+
+    // Last resort: old deterministic lanes
     const laneQueries = getLaneQueries(context.profile, {
       emptyFunnel,
       language: fallbackLang,
     });
     if (laneQueries.length >= 2) {
-      const plans = laneQueriesToPlans(laneQueries, fallbackLang);
       return finalizeSearchPlan(
-        plans,
+        laneQueriesToPlans(laneQueries, fallbackLang),
         heuristicLevel,
-        emptyFunnel
-          ? `Empty-funnel recovery: 1 dream + bridge lanes (${laneQueries.join(", ")})`
-          : `Strategy/target lanes: ${laneQueries.join(", ")}`,
+        `Raw lane fallback: ${laneQueries.join(", ")}`,
         `Lane language bias: ${fallbackLang}`,
         userSetting
       );
@@ -317,19 +351,21 @@ HIREABILITY FIRST (judgment — no keyword blacklists):
 - Do NOT invent experience; DO invent plausible NEXT role directions supported by skills they already demonstrated.`;
 
     const result = await generateStructured(
-      `Design a FULLY AI-powered job board search plan for this candidate's IDEAL NEXT ROLES — roles an employer would hire them for SOON.
+      `Design a FULLY AI-powered job board search plan that explores the PATH toward this candidate's north star — hireable footholds plus careful stretch, not dream prose as keywords.
 
-Read their entire resume, LinkedIn, portfolio, preferences, and CAREER LADDER.
+${ETHOS_AGENT_BLOCK}
 
-${ladderBlock || "No career ladder yet — invent 4 hireable-now queries from transferable strengths (same craft + mild scope step-ups)."}
+Read their entire resume, LinkedIn, portfolio, preferences, Career Intent if present, and CAREER LADDER.
+
+${ladderBlock || "No career ladder yet — invent 4 hireable-now foothold queries from transferable strengths (same craft + mild scope step-ups toward their prefs/Intent)."}
 
 STEP 1 — Infer REALISTIC target experience level from evidence of ownership/years/titles:
 - Levels: junior | mid | senior | staff | principal
-- Aim one step up when the profile supports a same-craft ladder climb
+- Aim one step up when the profile supports a same-craft climb toward the star
 
 STEP 2 — Decide search language strategy (single vs mixed) using the framework below.
 
-STEP 3 — Produce exactly 4 LinkedIn/Indeed keyword queries.
+STEP 3 — Produce exactly 4 LinkedIn/Indeed keyword queries (2–5 words; never founder/north-star sentences).
 
 ${languageBlock}
 
@@ -339,6 +375,7 @@ QUERY RULES:
 - 2-5 words each; role-style phrases boards understand
 - Tag each query with intent "next" or "stretch"
 - Language tag per query (nl/en) must match the strategy
+- Prefer footholds (next) over stretch; respect Never / anti-goals
 
 Ladder search seeds (use or refine — drop any seed that requires a craft they lack, unless it is a user-enabled target): ${ladderQueries.join(", ") || "none — invent from profile"}
 Seed role hints: ${seedRoles.join(", ") || "infer freely from resume"}

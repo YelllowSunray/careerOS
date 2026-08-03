@@ -4,6 +4,8 @@ import { formatContextForPrompt } from "@/lib/candidate/context";
 import type { CandidateContext } from "@/lib/types/candidate-context";
 import type { CareerIntent, SearchStrategy } from "@/lib/types";
 import { nowIso } from "@/lib/utils/dates";
+import { ETHOS_AGENT_BLOCK } from "@/lib/career/ethos";
+import { formatCareerIntentForPrompt } from "@/lib/job-search/career-intent";
 
 const coachSchema = z.object({
   diagnosis: z.string(),
@@ -20,6 +22,9 @@ const coachSchema = z.object({
       antiGoals: z.array(z.string()).optional(),
       workSetting: z.enum(["office", "hybrid", "floor", "flexible"]).optional(),
       openQuestions: z.array(z.string()).optional(),
+      stretchTolerance: z
+        .enum(["hireable_only", "show_stretch", "dream_aggressive"])
+        .optional(),
     })
     .optional(),
 });
@@ -36,17 +41,28 @@ export async function runJobsCoach(input: {
   roundsWithoutSave?: number;
   recentRejectionThemes?: string[];
 }): Promise<JobsCoachResult> {
-  const result = await generateStructured(
-    `You are Career OS jobs coach. The candidate's search is empty or stuck.
+  const northStar =
+    input.context.profile.careerIntent?.northStar?.trim() || "their north star";
+  const intentBlock = formatCareerIntentForPrompt(input.context.profile);
 
-Diagnose why (craft gap vs wrong queries vs never-list conflict) and propose an updated Dream / Bridge / Never strategy they can confirm.
+  const result = await generateStructured(
+    `You are Career OS jobs coach. The candidate's path toward their north star is empty or stuck.
+
+${ETHOS_AGENT_BLOCK}
+
+NORTH STAR: "${northStar}"
+${intentBlock || ""}
+
+Diagnose why (unsearchable dream queries, craft gap, geo, senior conflict, never-list, hireable_only + only Head-of searches) and propose an updated Dream / Bridge / Never strategy they can confirm.
 
 Rules:
-- Honor anti-goals and office preference — never re-propose hands-on warehouse/floor titles they rejected.
-- Bridge = hireable-now office-adjacent roles that still move toward the dream.
-- Dream can stay aspirational.
+- Speak in path language tied to the north star (footholds / steps / stretch — not silence).
+- Honor Boundaries (Never / anti-goals) — never re-propose cliffs they named (warehouse floor, PA track, etc.).
+- Bridge = board-ready 2–5 word hireable footholds that still move toward the star.
+- Dream = at most careful stretch titles boards understand — never "founder of my own…".
+- If stretchTolerance is hireable_only but they only search Head-of / founder titles, propose show_stretch + mid footholds OR keep hireable_only with real bridge queries.
 - One clarifying question.
-- Be concise and concrete.
+- Be concise, concrete, honest about tradeoffs.
 
 Recent empty rounds: ${input.roundsWithoutSave ?? "unknown"}
 Rejection themes: ${(input.recentRejectionThemes ?? []).join("; ") || "none logged"}
@@ -56,7 +72,7 @@ Return JSON:
   "diagnosis": "...",
   "clarifyingQuestion": "...",
   "proposedStrategy": { "dream": [], "bridge": [], "never": [] },
-  "intentPatch": { "openQuestions": [] }
+  "intentPatch": { "openQuestions": [], "stretchTolerance": "show_stretch" }
 }
 
 CANDIDATE:
@@ -96,6 +112,7 @@ ${formatContextForPrompt(input.context, 12000)}`,
           antiGoals: result.intentPatch.antiGoals,
           workSetting: result.intentPatch.workSetting,
           openQuestions: result.intentPatch.openQuestions,
+          stretchTolerance: result.intentPatch.stretchTolerance,
         }
       : undefined,
   };

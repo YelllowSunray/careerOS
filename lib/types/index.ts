@@ -422,7 +422,12 @@ export interface MissingSkill {
 }
 
 /** How this job sits on the candidate's ladder path. */
-export type JobPathType = "step" | "stretch" | "destination" | "lateral";
+export type JobPathType =
+  | "step"
+  | "stretch"
+  | "destination"
+  | "lateral"
+  | "regressive";
 
 export interface JobMatch {
   id: string;

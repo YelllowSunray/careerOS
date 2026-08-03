@@ -9,6 +9,8 @@ import { getPrimaryCountry } from "@/lib/job-search/countries";
 import { formatCommuteForPrompt } from "@/lib/commute/helpers";
 import { screenCommute } from "@/lib/commute/screening";
 import { formatTargetRolesForPrompt } from "@/lib/job-search/target-roles";
+import { ETHOS_AGENT_BLOCK } from "@/lib/career/ethos";
+import { formatCareerIntentForPrompt } from "@/lib/job-search/career-intent";
 import {
   formatWorkPreferences,
   normalizeWorkPreferences,
@@ -65,7 +67,7 @@ const matchSchema = z.object({
   /** false = violates user-taught feedback constraints */
   feedbackRequirementMet: z.boolean(),
   feedbackNotes: z.string(),
-  pathType: z.enum(["step", "stretch", "destination", "lateral"]),
+  pathType: z.enum(["step", "stretch", "destination", "lateral", "regressive"]),
   ladderPath: z.string(),
   matchedDestination: z.string().optional(),
   employerType: z.string().optional(),
@@ -120,42 +122,48 @@ Preferred locations: ${countries}
 Set preferencesMatch=true and preferenceAlignment="No specific job preferences stated."`;
 
   const targetRolesBlock = formatTargetRolesForPrompt(context.profile);
+  const intentBlock = formatCareerIntentForPrompt(context.profile);
+  const northStar =
+    context.profile.careerIntent?.northStar?.trim() ||
+    context.profile.targetRoles?.primary?.trim() ||
+    context.structuredProfile?.careerLadder?.currentRole ||
+    "their next ideal role";
+
   const targetRolesScoring = targetRolesBlock
     ? `
 ${targetRolesBlock}
 
 TARGET ROLE SCORING (soft — not a hard veto):
-- Prefer jobs whose title/family aligns with enabled target roles.
+- Prefer jobs whose title/family aligns with enabled target roles when they also move toward the north star.
 - Still apply coreCraftFit / skillRequirementMet honestly; do not invent eligibility.`
     : "";
 
-  const ladderScoringBlock = ladderBlock
-    ? `
-${ladderBlock}
+  const pathScoringBlock = `
+NORTH STAR: "${northStar}"
+${intentBlock || "(No Career Intent cached — use ladder + prefs as the star proxy.)"}
 
-LADDER MATCHING RULES:
-- Score this job against ladder DESTINATIONS (next + stretch), not "does the title match the CV".
-- Prefer same-title BIGGER SCOPE and adjacent-title BROADER OWNERSHIP over lateral clones.
-- BUT: ladder destination alone does NOT make them eligible. If coreCraftFit=not_eligible, hide even if the title matches a stretch role.
-- pathType:
-  - "step": maps to a nextRoles destination (~0–18 months) or unlocks one soon AND contribution is credible
-  - "stretch": maps to a stretchRoles destination or clear ambitious climb AND contribution is credible
-  - "destination": strong direct hit on a ladder title (next or stretch) AND contribution is credible
-  - "lateral": same scope / title synonym with no meaningful climb — or overqualified for a smaller role — score lower
-- matchedDestination: ladder title this job maps to (or omit if none)
-- ladderPath: one sentence path, e.g. "This Risk Analyst role → positions you for Senior Compliance / Governance in 1–2 moves"
-- scopeIncrease (0-100): team size, budget, stakeholders, decision rights, market size, IC→lead — NOT title synonymy. Lateral clones ≤35.
-- reasoning MUST be consistent with coreCraftFit, skillRequirementMet, commuteRequirementMet, and pathType (do not claim commute fails if commuteRequirementMet=true).
-- applyRecommendation=true ONLY when skillRequirementMet AND commuteRequirementMet AND fitScore≥50 AND the role is a credible step/stretch/destination — NEVER recommend pure laterals as career applications unless the candidate is unemployed / seeking any work.`
-    : `
-No career ladder cached — still score scopeIncrease vs current role evidence.
-Prefer scope step-ups and adjacent moves over lateral title clones.
-pathType: step | stretch | destination | lateral as best judgment.
-ladderPath: one sentence on how this job compounds into a bigger jump.`;
+${ETHOS_AGENT_BLOCK}
 
-  return `You are an expert career coach finding the candidate's IDEAL NEXT ROLE on their career ladder — not a clone of their current job title.
+PATH MATCHING (distance to north star — required):
+- pathType MUST be one of: destination | step | stretch | lateral | regressive
+- destination: strong on-path hit (near-term destination or clear star-aligned role) AND contribution credible
+- step: foothold / scope step-up that builds toward the star AND contribution credible
+- stretch: toward the star but craft/seniority gap — contribution may be weaker; gaps must be honest
+- lateral: same altitude; little progress toward the star — lower fit; do not recommend apply
+- regressive: away from the star OR into Never/anti-goals (warehouse floor when they want office, PA when they refuse admin, etc.) — skillRequirementMet may still be true but pathType=regressive means HIDE
+- matchedDestination: north-star or ladder title this maps to (or omit)
+- ladderPath: one sentence naming the path, e.g. "Step toward Head of Social Impact via program delivery ownership"
+- scopeIncrease (0-100): ownership climb — NOT title synonymy. Laterals ≤35. Regressive ≤25.
+- applyRecommendation=true ONLY for destination/step/stretch with credible contribution — NEVER for lateral or regressive
+- "No senior" prefs mean: fail hard senior must-haves they cannot meet — NOT ban every next-rung title that contains Senior when it is a natural step toward the star and contribution is credible
 
-Core idea: ladder climbing via contribution × learning × money × SCOPE INCREASE. Slight sector moves that raise scope (Compliance → Risk/AML/Privacy) are first-class wins.
+${ladderBlock ? `${ladderBlock}\nUse ladder next/stretch as footholds toward the north star when Intent is thin.` : "No career ladder cached — still path-score vs north star + current role evidence."}`;
+
+  return `You are Career OS — an expert career partner guiding this candidate toward their NORTH STAR ideal next roles.
+
+${ETHOS_AGENT_BLOCK}
+
+Core idea: guide via contribution × learning × money × SCOPE × PATH-TO-STAR. Slight sector moves that raise scope and advance the star are first-class wins.
 
 THE THREE PILLARS (score each 0-100 from the full profile + posting — pure judgment, no keyword rules):
 
@@ -165,7 +173,7 @@ THE THREE PILLARS (score each 0-100 from the full profile + posting — pure jud
    If coreCraftFit=not_eligible, contributionScore MUST be ≤45.
    If coreCraftFit=day_one or with_ramp, contribution can still be high (60–90) even with tool gaps.
 
-2) LEARNING — Does this raise their ceiling over time?
+2) LEARNING — Does this raise their ceiling toward the north star over time?
    New scope, harder problems, leadership, tools they'll ramp on — raise learningScore when learn_on_job gaps exist or coreCraftFit=with_ramp.
    learningScore MUST NOT inflate eligibility when coreCraftFit=not_eligible.
    A training budget does NOT turn a specialty lead role into a fit if they must already lead that specialty.
@@ -181,12 +189,11 @@ SCOPE INCREASE (0-100) — fourth signal, explicit:
 OVERALL fitScore (0-100):
 - contributionScore is the primary driver — fitScore should rarely exceed contributionScore + 15.
 - learningScore and scopeIncrease are tiebreakers only when contribution is credible (≥55).
-- Prefer step/stretch/destination over lateral ONLY when contribution is credible.
-- DO NOT require the job title or branch to match their current title.
-- Mild seniority stretch (+1) is welcome when contribution stays credible.
+- Prefer destination/step/stretch over lateral ONLY when contribution is credible; regressive → fitScore ≤35.
+- Mild seniority stretch (+1) is welcome when contribution stays credible and it advances the star.
 - If core deliverables are unmet, fitScore MUST be ≤50 regardless of learning/money/scope.
 
-TARGET SENIORITY BASELINE: ${seniorityLabel(targetLevel)} (stretch up is encouraged when earned by the profile).
+TARGET SENIORITY BASELINE: ${seniorityLabel(targetLevel)} (stretch up is encouraged when earned by the profile and aligned with the star).
 
 ${preferenceBlock}
 
@@ -196,9 +203,9 @@ ${languageBlock}
 
 ${commuteBlock}
 
-${ladderScoringBlock}
+${pathScoringBlock}
 
-preferencesMatch: soft true/false vs stated prefs (informational only — never veto an ideal ladder move).
+preferencesMatch: soft true/false vs stated prefs (informational only — never veto an ideal path move toward the star).
 languageRequirementMet: HARD gate — false means this job must not be shown to the candidate.
 commuteRequirementMet: HARD gate when max commute minutes is set (including home-base only = 0). Home-base only → true only if job is in home-base city; false for other cities and remote. Max > 0 → false when commute exceeds limit; true when remote or within limit.
 feedbackRequirementMet: HARD gate when USER-TAUGHT SEARCH CONSTRAINTS appear in the candidate block — false when this job clearly violates those learned lessons (e.g. user said roles like this are too senior). When uncertain, true. When no taught constraints, true.
@@ -208,15 +215,15 @@ CORE CRAFT FIT — PRIMARY ELIGIBILITY (AI judgment, not keyword matching):
 Decide ONE of:
 - "day_one": Same craft; they can deliver core duties immediately with existing evidence.
 - "with_ramp": Same craft; they can deliver core duties within ~90 days while learning tools/systems/processes on the job. KEEP the job.
-- "not_eligible": Wrong craft, or a true day-1 blocker (specialty they never practiced, essential license/credential, OR multi-year specialty experience the posting treats as required with no equivalent evidence). HIDE the job.
+- "not_eligible": Wrong craft, or a true day-1 blocker (specialty they never practiced, essential license/credential, OR multi-year specialty experience the posting treats as required with no equivalent evidence). HIDE unless this is an enabled dream/target and stretch is allowed (then pathType=stretch with honest gaps — discovery may show as stretch).
 
 HARD vs SOFT vs LEARNABLE (judge each gap — this drives show/hide):
-1) HARD / must_have → coreCraftFit=not_eligible (HIDE):
-   - Posting requires N years in a named specialty that IS the job (e.g. "8–10 years platform management / digital transformation") and the CV shows no comparable specialty years — leadership in a different craft does NOT substitute.
+1) HARD / must_have → coreCraftFit=not_eligible (HIDE unless dream-stretch exception above):
+   - Posting requires N years in a named specialty that IS the job and the CV shows no comparable specialty years — leadership in a different craft does NOT substitute.
    - Essential license, degree, registration, or regulated credential missing.
-   - Core deliverables are a specialty the candidate has never practiced (digital platform ownership, S&OP design, ERP implementation lead, etc.).
+   - Core deliverables are a specialty the candidate has never practiced.
 2) LEARNABLE / learn_on_job → coreCraftFit=with_ramp (SHOW):
-   - Tools, frameworks, methodologies, agile practices, Lean Portfolio Management, a specific stack — when the underlying craft/leadership already matches.
+   - Tools, frameworks, methodologies, agile practices, a specific stack — when the underlying craft/leadership already matches.
    - Mild step-up in team size or stakeholder complexity on the SAME craft.
 3) SOFT / nice_to_have → does not hide:
    - Explicitly "nice to have", "plus", "preferred", "voordeel", "pre" in the posting.
@@ -283,9 +290,9 @@ Return ONLY valid JSON:
   "skillNotes": "1 sentence on skill/credential eligibility",
   "feedbackRequirementMet": true/false,
   "feedbackNotes": "1 sentence if taught constraints apply",
-  "pathType": "step" | "stretch" | "destination" | "lateral",
-  "ladderPath": "This X role → positions you for Y in 1–2 moves",
-  "matchedDestination": "ladder title or omit",
+  "pathType": "step" | "stretch" | "destination" | "lateral" | "regressive",
+  "ladderPath": "Step toward [north star] via …",
+  "matchedDestination": "north-star or ladder title or omit",
   "employerType": "short label"
 }
 
@@ -310,6 +317,8 @@ function coercePathType(raw: unknown): JobPathType {
   if (s === "stretch" || s === "ambitious") return "stretch";
   if (s === "destination" || s === "target") return "destination";
   if (s === "lateral" || s === "sideways") return "lateral";
+  if (s === "regressive" || s === "regression" || s === "off_path" || s === "cliff")
+    return "regressive";
   return "step";
 }
 
@@ -320,6 +329,7 @@ function applyLadderFitBias(
   pathType: JobPathType,
   contributionScore: number
 ): number {
+  if (pathType === "regressive") return Math.min(clampScore(fitScore), 35);
   if (contributionScore < 55) return clampScore(fitScore);
   let score = fitScore;
   if (pathType === "lateral" && scopeIncrease < 40) {
@@ -460,7 +470,8 @@ function normalizeMatchResult(
     feedbackRequirementMet &&
     !isSkillIneligible({ skillRequirementMet, coreCraftFit, missingSkills }) &&
     fitOut >= 50 &&
-    pathType !== "lateral";
+    pathType !== "lateral" &&
+    pathType !== "regressive";
 
   return {
     ...result,

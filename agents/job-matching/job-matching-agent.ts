@@ -51,6 +51,12 @@ export const jobMatchingAgent: Agent<JobMatchingInput, JobMatch[]> = {
           );
           continue;
         }
+        if (result.pathType === "regressive") {
+          console.log(
+            `[Job matching] Skipped (regressive/off-path): ${job.title} @ ${job.company} · ${result.ladderPath || result.reasoning || "away from north star"}`
+          );
+          continue;
+        }
         if (isSkillIneligible(result)) {
           console.log(
             `[Job matching] Skipped (skills): ${job.title} @ ${job.company} · coreCraftFit=${result.coreCraftFit ?? "?"} · skillRequirementMet=${result.skillRequirementMet} · [${unmetHardRequirementLabels(result.missingSkills).join(", ") || result.skillNotes || "core skill fit not met"}]`

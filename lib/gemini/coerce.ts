@@ -608,7 +608,13 @@ export function normalizeJobMatch(raw: unknown): unknown {
     .toLowerCase()
     .trim();
   let pathType: string = "step";
-  if (pathRaw.includes("stretch")) pathType = "stretch";
+  if (
+    pathRaw.includes("regress") ||
+    pathRaw.includes("off_path") ||
+    pathRaw.includes("cliff")
+  )
+    pathType = "regressive";
+  else if (pathRaw.includes("stretch")) pathType = "stretch";
   else if (pathRaw.includes("dest")) pathType = "destination";
   else if (pathRaw.includes("later") || pathRaw.includes("side"))
     pathType = "lateral";

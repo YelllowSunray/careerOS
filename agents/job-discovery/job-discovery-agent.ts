@@ -291,6 +291,13 @@ async function listingsToMatchedJobs(
           context.profile
         );
 
+        if (matchResult.pathType === "regressive") {
+          console.log(
+            `[Job discovery] [${platform}] Rejected (regressive/off-path): ${listing.title} @ ${listing.company} · ${matchResult.ladderPath || matchResult.reasoning || "away from north star"}`
+          );
+          return { kind: "rejected" as const, identityKey };
+        }
+
         if (matchResult.languageRequirementMet === false) {
           console.log(
             `[Job discovery] [${platform}] Rejected (language): ${listing.title} @ ${listing.company} · requires [${(matchResult.requiredLanguages ?? []).join(", ") || "?"}] — ${matchResult.languageNotes || "candidate missing required language"}`

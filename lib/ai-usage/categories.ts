@@ -11,6 +11,7 @@ export const AI_USAGE_CATEGORY_LABELS: Record<AiUsageCategory, string> = {
 
 const JOB_SEARCH_OPS = new Set([
   "job_search_queries",
+  "intent_board_queries",
   "listing_relevance",
   "listing_validate",
   "job_listing_extract",

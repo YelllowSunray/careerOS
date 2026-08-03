@@ -49,15 +49,42 @@ const ADZUNA_COUNTRY: Record<string, string> = {
   ireland: "ie",
 };
 
-/** First non-empty country from profile — skips legacy "remote" entries. */
+/** First non-empty country from profile — skips legacy "remote" entries.
+ *  Also unwraps comma-separated blobs like "Africa, Asia, The Netherlands".
+ */
 export function getPrimaryCountry(countries: string[]): string | null {
+  const tokens: string[] = [];
   for (const raw of countries) {
-    const country = raw.trim();
-    if (!country) continue;
-    if (/^remote$/i.test(country)) continue;
-    return country;
+    for (const part of String(raw).split(/[,;/|]+/)) {
+      const country = part.trim();
+      if (!country) continue;
+      if (/^remote$/i.test(country)) continue;
+      tokens.push(country);
+    }
   }
-  return null;
+  if (tokens.length === 0) return null;
+
+  // Prefer a concrete board-supported country over continents.
+  const preferred = tokens.find((t) => {
+    const k = t.toLowerCase();
+    return (
+      INDEED_DOMAIN[k] != null ||
+      ADZUNA_COUNTRY[k] != null ||
+      k.includes("nether") ||
+      k.includes("nederland") ||
+      k === "nl"
+    );
+  });
+  if (preferred) {
+    if (/nether|nederland|^nl$/i.test(preferred)) return "Netherlands";
+    return preferred;
+  }
+
+  // Drop bare continents — they break LinkedIn location search.
+  const nonContinent = tokens.find(
+    (t) => !/^(africa|asia|europe|eu|worldwide|global)$/i.test(t.trim())
+  );
+  return nonContinent ?? null;
 }
 
 export function normalizePreferredCountries(input: string): string[] {
