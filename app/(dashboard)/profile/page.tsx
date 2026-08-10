@@ -9,15 +9,9 @@ import { ProfileDetailsCard } from "@/components/profile/profile-details-card";
 import { TargetRolesSection } from "@/components/profile/target-roles-section";
 import { CareerIntentCard } from "@/components/profile/career-intent-card";
 import type { UserProfile, CandidateProfile, ResumeData, Workflow, FeedbackPreferenceState } from "@/lib/types";
-import type { AiUsageRecord } from "@/lib/types/ai-usage";
-import {
-  AI_USAGE_CATEGORY_LABELS,
-  getCategoryTotals,
-  type AiUsageCategory,
-} from "@/lib/ai-usage/categories";
 import { isWorkflowActive, logWorkflowToConsole } from "@/lib/workflows/stale";
-import { Download, FileText, Loader2, RefreshCw, Sparkles, Trash2, Upload } from "lucide-react";
-import { RESUME_ACCEPT, isAllowedResumeFile, resumeFileTypeLabel } from "@/lib/resume/files";
+import { Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { isAllowedResumeFile, resumeFileTypeLabel } from "@/lib/resume/files";
 
 export default function ProfilePage() {
   const { apiFetch } = useApi();
@@ -25,7 +19,6 @@ export default function ProfilePage() {
   const [candidate, setCandidate] = useState<CandidateProfile | null>(null);
   const [resume, setResume] = useState<ResumeData | null>(null);
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
-  const [aiUsage, setAiUsage] = useState<AiUsageRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
@@ -44,7 +37,7 @@ export default function ProfilePage() {
 
   const loadData = useCallback(async () => {
     setProfileLoadError(null);
-    const [p, c, r, w, u, fb] = await Promise.all([
+    const [p, c, r, w, fb] = await Promise.all([
       apiFetch("/api/profile").catch((e) => {
         const message = e instanceof Error ? e.message : "Failed to load profile";
         logError("load profile", e);
@@ -63,10 +56,6 @@ export default function ProfilePage() {
         logError("load workflow status", e);
         return null;
       }),
-      apiFetch("/api/data?type=ai-usage").catch((e) => {
-        logError("load ai usage", e);
-        return null;
-      }),
       apiFetch("/api/jobs/feedback").catch((e) => {
         logError("load feedback preferences", e);
         return null;
@@ -76,7 +65,6 @@ export default function ProfilePage() {
     setCandidate(c);
     setResume(r);
     setWorkflow(w);
-    setAiUsage(u);
     setFeedbackPrefs(
       (fb as { preferences?: FeedbackPreferenceState | null } | null)?.preferences ??
         null
@@ -86,7 +74,7 @@ export default function ProfilePage() {
       logWorkflowToConsole(w, "Processing");
     }
 
-    return { p, c, r, w, u };
+    return { p, c, r, w };
   }, [apiFetch]);
 
   useEffect(() => {
@@ -451,278 +439,26 @@ export default function ProfilePage() {
           phoneDisplay={resume?.extracted.phoneNumber}
           isProcessing={isProcessing}
           onSave={handleSaveProfile}
+          resume={{
+            hasRawResume,
+            hasAiSummary: Boolean(candidate),
+            linkedInIngested: Boolean(candidate?.sources?.linkedin),
+            uploading: uploadingResume,
+            downloading: downloadingResume,
+            deleting: deletingResume,
+            onUpload: (file) => void handleResumeUpload(file),
+            onDownload: () => void handleDownloadResume(),
+            onDelete: () => void handleDeleteResume(),
+          }}
+          coverLetters={{
+            uploading: uploadingCoverLetter,
+            deletingId: deletingCoverLetterId,
+            onUpload: (file) => void handleCoverLetterUpload(file),
+            onDelete: (id) => void handleDeleteCoverLetter(id),
+          }}
         />
 
         <CareerIntentCard profile={profile} onSave={handleSaveProfile} />
-
-        <Card>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-violet-500" />
-            Gemini AI usage
-          </CardTitle>
-          {aiUsage ? (
-            <dl className="mt-4 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-zinc-500">Total tokens</dt>
-                <dd className="font-medium">{aiUsage.totalTokens.toLocaleString()}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-zinc-500">Input tokens</dt>
-                <dd>{aiUsage.promptTokens.toLocaleString()}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-zinc-500">Output tokens</dt>
-                <dd>{aiUsage.completionTokens.toLocaleString()}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-zinc-500">API requests</dt>
-                <dd>{aiUsage.requestCount}</dd>
-              </div>
-              <div className="flex justify-between border-t border-zinc-100 pt-2">
-                <dt className="text-zinc-500">Est. cost</dt>
-                <dd className="font-medium">${aiUsage.estimatedCostUsd.toFixed(4)}</dd>
-              </div>
-              {(() => {
-                const byCategory = getCategoryTotals(aiUsage);
-                const categories = (
-                  ["profile", "job_search", "application"] as AiUsageCategory[]
-                ).filter((c) => byCategory[c].requestCount > 0);
-                if (categories.length === 0) return null;
-                return (
-                  <div className="border-t border-zinc-100 pt-2">
-                    <dt className="mb-2 text-zinc-500">By feature</dt>
-                    <ul className="space-y-2 text-sm">
-                      {categories.map((category) => {
-                        const stats = byCategory[category];
-                        return (
-                          <li key={category} className="flex justify-between gap-2">
-                            <span className="text-zinc-600">
-                              {AI_USAGE_CATEGORY_LABELS[category]}
-                            </span>
-                            <span className="shrink-0 text-zinc-500">
-                              {stats.totalTokens.toLocaleString()} tok · $
-                              {stats.estimatedCostUsd.toFixed(4)}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                );
-              })()}
-              {aiUsage.recentCalls.length > 0 && (
-                <div className="pt-2">
-                  <dt className="mb-1 text-zinc-500">Recent calls</dt>
-                  <ul className="space-y-1 text-xs text-zinc-600">
-                    {aiUsage.recentCalls.slice(0, 5).map((call, i) => (
-                      <li key={`${call.at}-${i}`} className="flex justify-between gap-2">
-                        <span className="truncate">
-                          {call.operation.replace(/_/g, " ")}
-                          {call.category === "job_search" && (
-                            <span className="text-violet-500"> · search</span>
-                          )}
-                        </span>
-                        <span className="shrink-0 text-zinc-400">{call.totalTokens} tok</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </dl>
-          ) : (
-            <p className="mt-4 text-sm text-zinc-500">
-              No AI usage yet. Run Re-analyze or Find Jobs to start.
-            </p>
-          )}
-        </Card>
-
-        <Card>
-          <CardTitle>Resume</CardTitle>
-          <p className="mt-1 text-sm text-zinc-500">
-            Upload a new version anytime — AI will re-extract skills and your career ladder.
-          </p>
-          {profile.resume ? (
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex items-start gap-3">
-                <FileText className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
-                <div className="text-sm">
-                  <p className="font-medium">{profile.resume.fileName}</p>
-                  <p className="text-zinc-500">
-                    Uploaded {new Date(profile.resume.uploadedAt).toLocaleDateString()}
-                  </p>
-                  {hasRawResume && (
-                    <p className="mt-1 text-emerald-600">Resume text ingested</p>
-                  )}
-                  {candidate && (
-                    <p className="text-violet-600">AI summary available</p>
-                  )}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 self-start">
-                <Button
-                  variant="ghost"
-                  className="px-2 text-zinc-500 hover:text-zinc-900"
-                  disabled={
-                    downloadingResume || deletingResume || uploadingResume || isProcessing
-                  }
-                  onClick={() => void handleDownloadResume()}
-                  aria-label="Download resume"
-                >
-                  {downloadingResume ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="px-2 text-zinc-500 hover:text-red-600"
-                  disabled={deletingResume || uploadingResume || downloadingResume || isProcessing}
-                  onClick={() => void handleDeleteResume()}
-                  aria-label="Remove resume"
-                >
-                  {deletingResume ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-4 text-sm text-zinc-500">No resume uploaded</p>
-          )}
-
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className="inline-flex cursor-pointer">
-              <input
-                type="file"
-                className="hidden"
-                accept={RESUME_ACCEPT}
-                disabled={uploadingResume || deletingResume || isProcessing}
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  e.target.value = "";
-                  void handleResumeUpload(file);
-                }}
-              />
-              <span
-                className={`inline-flex items-center rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium transition-colors ${
-                  uploadingResume || deletingResume || isProcessing
-                    ? "cursor-not-allowed opacity-50"
-                    : "hover:bg-zinc-50"
-                }`}
-              >
-                {uploadingResume ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                {uploadingResume
-                  ? "Uploading…"
-                  : profile.resume
-                    ? "Replace resume"
-                    : "Upload resume"}
-              </span>
-            </label>
-            <p className="text-xs text-zinc-400">{resumeFileTypeLabel()}</p>
-          </div>
-
-          {profile.linkedInUrl && (
-            <div className="mt-4 border-t border-zinc-100 pt-4 text-sm">
-              <p className="font-medium text-zinc-800">LinkedIn profile</p>
-              <p className="mt-1 break-all text-zinc-500">{profile.linkedInUrl}</p>
-              {candidate?.sources?.linkedin ? (
-                <p className="mt-1 text-emerald-600">
-                  LinkedIn profile ingested — used for job matching
-                </p>
-              ) : (
-                <p className="mt-1 text-amber-700">
-                  Not ingested yet — click Re-analyze (sign in via Apply once if LinkedIn blocks guests)
-                </p>
-              )}
-            </div>
-          )}
-        </Card>
-
-        <Card>
-          <CardTitle>Cover letters</CardTitle>
-          <p className="mt-1 text-sm text-zinc-500">
-            Upload past cover letters as style references. When applying, AI writes a new letter for each job using your voice and structure — not a copy of these samples.
-          </p>
-
-          <div className="mt-4 space-y-3">
-            {(profile.coverLetters ?? []).length === 0 ? (
-              <p className="text-sm text-zinc-500">No cover letter samples yet</p>
-            ) : (
-              <ul className="space-y-2">
-                {(profile.coverLetters ?? []).map((letter) => (
-                  <li
-                    key={letter.id}
-                    className="flex flex-col gap-2 rounded-lg border border-zinc-100 px-3 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
-                  >
-                    <div className="flex min-w-0 items-start gap-2">
-                      <FileText className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
-                      <div className="min-w-0 text-sm">
-                        <p className="truncate font-medium">{letter.fileName}</p>
-                        <p className="text-zinc-500">
-                          Uploaded {new Date(letter.uploadedAt).toLocaleDateString()}
-                          {letter.rawText?.trim()
-                            ? " · text ready"
-                            : " · text extraction pending"}
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      className="shrink-0 px-2 text-zinc-500 hover:text-red-600"
-                      disabled={deletingCoverLetterId === letter.id}
-                      onClick={() => handleDeleteCoverLetter(letter.id)}
-                      aria-label={`Remove ${letter.fileName}`}
-                    >
-                      {deletingCoverLetterId === letter.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <label className="inline-flex cursor-pointer">
-              <input
-                type="file"
-                className="hidden"
-                accept={RESUME_ACCEPT}
-                disabled={uploadingCoverLetter || (profile.coverLetters?.length ?? 0) >= 5}
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  e.target.value = "";
-                  void handleCoverLetterUpload(file);
-                }}
-              />
-              <span
-                className={`inline-flex items-center rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium transition-colors ${
-                  uploadingCoverLetter || (profile.coverLetters?.length ?? 0) >= 5
-                    ? "cursor-not-allowed opacity-50"
-                    : "hover:bg-zinc-50"
-                }`}
-              >
-                {uploadingCoverLetter ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                {uploadingCoverLetter ? "Uploading…" : "Upload cover letter"}
-              </span>
-            </label>
-            <p className="text-xs text-zinc-400">
-              PDF or Word · up to 5 files
-            </p>
-          </div>
-        </Card>
 
         <Card className="lg:col-span-2">
           <CardTitle>Search filters you taught</CardTitle>

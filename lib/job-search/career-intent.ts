@@ -1,4 +1,6 @@
 import type {
+  CareerChatMessage,
+  CareerConversation,
   CareerIntent,
   SearchStrategy,
   StretchTolerance,
@@ -19,6 +21,96 @@ const STRETCH = new Set<StretchTolerance>([
   "show_stretch",
   "dream_aggressive",
 ]);
+
+/** Cap transcript size so profile docs stay bounded. */
+export const CAREER_CHAT_MAX_MESSAGES = 80;
+
+const WORK_SETTING_VALUES = ["office", "hybrid", "floor", "flexible"] as const;
+const STRETCH_VALUES = [
+  "hireable_only",
+  "show_stretch",
+  "dream_aggressive",
+] as const;
+
+/**
+ * Map free-form / NL / synonym work-setting answers onto our enum.
+ * "Thuis, flexibel" / remote / WFH → flexible (no separate remote enum).
+ */
+export function coerceWorkSetting(
+  raw: unknown
+): WorkSettingPreference | undefined {
+  if (raw == null || raw === "") return undefined;
+  const s = String(raw)
+    .toLowerCase()
+    .trim()
+    .replace(/[_-]+/g, " ");
+
+  if ((WORK_SETTING_VALUES as readonly string[]).includes(s)) {
+    return s as WorkSettingPreference;
+  }
+
+  if (
+    /\b(floor|werkvloer|magazijn|warehouse|shop\s*floor|productie|hands[-\s]?on\s*floor)\b/.test(
+      s
+    )
+  ) {
+    return "floor";
+  }
+
+  if (/\b(hybrid|hybride|deels\s*thuis|part[-\s]?time\s*office)\b/.test(s)) {
+    return "hybrid";
+  }
+
+  if (
+    /\b(flexible|flexibel|flex|remote|thuis|home|wfh|work\s*from\s*home|vanuit\s*huis|eigen\s*plek|anywhere|any)\b/.test(
+      s
+    )
+  ) {
+    return "flexible";
+  }
+
+  if (
+    /\b(office|kantoor|on\s*site|onsite|op\s*kantoor|eigen\s*kantoor)\b/.test(s)
+  ) {
+    return "office";
+  }
+
+  return undefined;
+}
+
+export function coerceStretchTolerance(
+  raw: unknown
+): StretchTolerance | undefined {
+  if (raw == null || raw === "") return undefined;
+  const s = String(raw)
+    .toLowerCase()
+    .trim()
+    .replace(/[\s-]+/g, "_");
+
+  if ((STRETCH_VALUES as readonly string[]).includes(s)) {
+    return s as StretchTolerance;
+  }
+
+  if (
+    /hireable|safe|conservative|realistic_only|only_hireable|geen_stretch/.test(
+      s
+    )
+  ) {
+    return "hireable_only";
+  }
+  if (
+    /dream_aggressive|aggressive|ambitious|max_stretch|full_dream|dream_only/.test(
+      s
+    )
+  ) {
+    return "dream_aggressive";
+  }
+  if (/stretch|balanced|moderate|show|open/.test(s)) {
+    return "show_stretch";
+  }
+
+  return undefined;
+}
 
 function stringList(raw: unknown, max = 12): string[] {
   if (!Array.isArray(raw)) return [];
@@ -57,19 +149,24 @@ export function parseCareerIntentBody(raw: unknown): CareerIntent | undefined {
       ? (o.horizon as Record<string, unknown>)
       : {};
 
+  const coercedWork =
+    coerceWorkSetting(o.workSetting ?? o.work_setting) ??
+    (WORK_SETTINGS.has(workSetting) ? workSetting : "flexible");
+  const coercedStretch =
+    coerceStretchTolerance(o.stretchTolerance ?? o.stretch_tolerance) ??
+    (STRETCH.has(stretchTolerance) ? stretchTolerance : "show_stretch");
+
   return {
     northStar: String(o.northStar ?? o.north_star ?? "").trim(),
     narrative: String(o.narrative ?? "").trim(),
     antiGoals: stringList(o.antiGoals ?? o.anti_goals),
-    workSetting: WORK_SETTINGS.has(workSetting) ? workSetting : "flexible",
+    workSetting: coercedWork,
     horizon: {
       now: stringList(horizonRaw.now),
       sixMonths: stringList(horizonRaw.sixMonths ?? horizonRaw.six_months),
       twoYears: stringList(horizonRaw.twoYears ?? horizonRaw.two_years),
     },
-    stretchTolerance: STRETCH.has(stretchTolerance)
-      ? stretchTolerance
-      : "show_stretch",
+    stretchTolerance: coercedStretch,
     moneyFloor: String(o.moneyFloor ?? o.money_floor ?? "").trim() || undefined,
     nonNegotiables: stringList(o.nonNegotiables ?? o.non_negotiables),
     openQuestions: stringList(o.openQuestions ?? o.open_questions),
@@ -91,6 +188,52 @@ export function parseSearchStrategyBody(
     confirmedAt: String(
       o.confirmedAt ?? o.confirmed_at ?? new Date().toISOString()
     ),
+  };
+}
+
+export function parseCareerChatMessages(raw: unknown): CareerChatMessage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CareerChatMessage[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const m = item as Record<string, unknown>;
+    const role = String(m.role ?? "").toLowerCase().trim();
+    const content = String(m.content ?? m.text ?? "").trim();
+    if ((role !== "user" && role !== "assistant") || !content) continue;
+    const at = String(m.at ?? m.createdAt ?? m.created_at ?? "").trim();
+    out.push({
+      role,
+      content,
+      ...(at ? { at } : {}),
+    });
+    if (out.length >= CAREER_CHAT_MAX_MESSAGES) break;
+  }
+  return out;
+}
+
+export function buildCareerConversation(input: {
+  messages: CareerChatMessage[];
+  draftIntent?: CareerIntent | null;
+  draftStrategy?: SearchStrategy | null;
+  awaitingConfirm?: boolean;
+  previous?: CareerConversation | null;
+}): CareerConversation {
+  const messages = parseCareerChatMessages(input.messages).slice(
+    -CAREER_CHAT_MAX_MESSAGES
+  );
+  return {
+    messages,
+    updatedAt: new Date().toISOString(),
+    draftIntent:
+      input.draftIntent === undefined
+        ? input.previous?.draftIntent
+        : input.draftIntent ?? undefined,
+    draftStrategy:
+      input.draftStrategy === undefined
+        ? input.previous?.draftStrategy
+        : input.draftStrategy ?? undefined,
+    awaitingConfirm:
+      input.awaitingConfirm ?? input.previous?.awaitingConfirm ?? false,
   };
 }
 

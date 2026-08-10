@@ -1,29 +1,53 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { UserProfile, WorkArrangement } from "@/lib/types";
+import type { UserProfile } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardTitle } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
-  profileToFormValues,
-  formValuesToProfileUpdate,
-  type ProfileFormValues,
+  Download,
+  FileText,
+  Loader2,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import {
+  profileToIdentityForm,
+  identityFormToUpdate,
+  type IdentityFormValues,
 } from "./profile-form";
-import {
-  WORK_ARRANGEMENTS,
-  WORK_ARRANGEMENT_LABELS,
-  toggleWorkArrangement,
-} from "@/lib/job-search/work-preference";
+import { RESUME_ACCEPT, resumeFileTypeLabel } from "@/lib/resume/files";
 
 const AUTOSAVE_MS = 700;
+
+export interface ProfileResumeProps {
+  hasRawResume: boolean;
+  hasAiSummary: boolean;
+  linkedInIngested?: boolean;
+  uploading: boolean;
+  downloading: boolean;
+  deleting: boolean;
+  onUpload: (file: File | null) => void;
+  onDownload: () => void;
+  onDelete: () => void;
+}
+
+export interface ProfileCoverLettersProps {
+  uploading: boolean;
+  deletingId: string | null;
+  onUpload: (file: File | null) => void;
+  onDelete: (id: string) => void;
+}
 
 interface ProfileDetailsCardProps {
   profile: UserProfile;
   phoneDisplay?: string;
   isProcessing?: boolean;
   onSave: (update: Partial<UserProfile>) => Promise<void>;
+  resume?: ProfileResumeProps;
+  coverLetters?: ProfileCoverLettersProps;
 }
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -33,14 +57,16 @@ export function ProfileDetailsCard({
   phoneDisplay,
   isProcessing,
   onSave,
+  resume,
+  coverLetters,
 }: ProfileDetailsCardProps) {
-  const [form, setForm] = useState<ProfileFormValues>(() =>
-    profileToFormValues(profile, phoneDisplay)
+  const [form, setForm] = useState<IdentityFormValues>(() =>
+    profileToIdentityForm(profile, phoneDisplay)
   );
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
   const lastSavedJson = useRef(
-    JSON.stringify(formValuesToProfileUpdate(form, profile))
+    JSON.stringify(identityFormToUpdate(form, profile))
   );
   const profileRef = useRef(profile);
   const onSaveRef = useRef(onSave);
@@ -50,20 +76,19 @@ export function ProfileDetailsCard({
   profileRef.current = profile;
   onSaveRef.current = onSave;
 
-  // Sync from server when profile changes (except right after our own save).
   useEffect(() => {
     if (skipNextProfileSync.current) {
       skipNextProfileSync.current = false;
-      const next = profileToFormValues(profile, phoneDisplay);
+      const next = profileToIdentityForm(profile, phoneDisplay);
       lastSavedJson.current = JSON.stringify(
-        formValuesToProfileUpdate(next, profile)
+        identityFormToUpdate(next, profile)
       );
       return;
     }
-    const next = profileToFormValues(profile, phoneDisplay);
+    const next = profileToIdentityForm(profile, phoneDisplay);
     setForm(next);
     lastSavedJson.current = JSON.stringify(
-      formValuesToProfileUpdate(next, profile)
+      identityFormToUpdate(next, profile)
     );
     setStatus("idle");
     setSaveError("");
@@ -76,7 +101,7 @@ export function ProfileDetailsCard({
       return;
     }
 
-    const update = formValuesToProfileUpdate(form, current);
+    const update = identityFormToUpdate(form, current);
     const json = JSON.stringify(update);
     if (json === lastSavedJson.current) {
       return;
@@ -108,15 +133,8 @@ export function ProfileDetailsCard({
     };
   }, [form]);
 
-  function update(field: keyof ProfileFormValues, value: string) {
+  function update(field: keyof IdentityFormValues, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function toggleWorkPreference(arrangement: WorkArrangement) {
-    setForm((prev) => ({
-      ...prev,
-      workPreferences: toggleWorkArrangement(prev.workPreferences, arrangement),
-    }));
   }
 
   const statusLabel =
@@ -132,10 +150,23 @@ export function ProfileDetailsCard({
               ? "Extracting…"
               : "Autosave on";
 
+  const resumeBusy =
+    !!resume &&
+    (resume.uploading ||
+      resume.downloading ||
+      resume.deleting ||
+      !!isProcessing);
+
   return (
     <Card className="lg:col-span-2">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <CardTitle>Profile details</CardTitle>
+        <div>
+          <CardTitle>Profile details</CardTitle>
+          <p className="mt-1 text-xs text-zinc-500">
+            Who you are — contact, resume, cover-letter samples, languages, and
+            links. Job search prefs live under Career intent.
+          </p>
+        </div>
         <p
           className={`flex items-center gap-1.5 text-xs font-medium ${
             status === "error"
@@ -191,29 +222,7 @@ export function ProfileDetailsCard({
             <p className="mt-1 text-xs text-zinc-500">Extracting from resume…</p>
           )}
         </div>
-        <div className="sm:col-span-2">
-          <Label>Work preference</Label>
-          <div className="mt-2 flex flex-wrap gap-3">
-            {WORK_ARRANGEMENTS.map((arrangement) => (
-              <label
-                key={arrangement}
-                className="inline-flex items-center gap-2 text-sm text-zinc-700"
-              >
-                <input
-                  type="checkbox"
-                  checked={form.workPreferences.includes(arrangement)}
-                  onChange={() => toggleWorkPreference(arrangement)}
-                  className="h-4 w-4 rounded border-zinc-300"
-                />
-                {WORK_ARRANGEMENT_LABELS[arrangement]}
-              </label>
-            ))}
-          </div>
-          <p className="mt-1 text-xs text-zinc-500">
-            Select all that apply. Leave all unchecked if you are open to any.
-          </p>
-        </div>
-        <div className="sm:col-span-2">
+        <div>
           <Label htmlFor="edit-languages">Languages spoken</Label>
           <Input
             id="edit-languages"
@@ -223,130 +232,207 @@ export function ProfileDetailsCard({
             className="mt-1"
           />
           <p className="mt-1 text-xs text-zinc-500">
-            Comma-separated. Jobs that require a language you do not speak will be
-            hidden.
+            Comma-separated. Jobs that require a language you do not speak will
+            be hidden.
           </p>
         </div>
-        <div className="sm:col-span-2">
-          <Label htmlFor="edit-home">Home base (for commute)</Label>
-          <Input
-            id="edit-home"
-            value={form.homeLocation}
-            onChange={(e) => update("homeLocation", e.target.value)}
-            placeholder="Baarn, Netherlands"
-            className="mt-1"
-          />
-          <label className="mt-2 flex items-start gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={form.commuteHomeBaseOnly}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  commuteHomeBaseOnly: e.target.checked,
-                  commuteNoLimit: e.target.checked ? false : prev.commuteNoLimit,
-                  commuteMaxMinutes: e.target.checked
-                    ? ""
-                    : prev.commuteMaxMinutes,
-                }))
-              }
-              className="mt-0.5 rounded border-zinc-300"
-            />
-            <span>
-              <span className="font-medium">Home base only</span>
-              <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                Only show jobs located in your home-base city
-                {form.homeLocation.trim()
-                  ? ` (${form.homeLocation.trim().split(",")[0]?.trim()})`
-                  : ""}
-                . Other cities and remote elsewhere are hidden.
-              </span>
-            </span>
-          </label>
-        </div>
-        <div>
-          <Label htmlFor="edit-commute-mode">Commute mode</Label>
-          <select
-            id="edit-commute-mode"
-            value={form.commuteMode}
-            onChange={(e) => update("commuteMode", e.target.value)}
-            disabled={form.commuteHomeBaseOnly}
-            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base disabled:bg-zinc-50 disabled:text-zinc-400 sm:py-2 sm:text-sm"
-          >
-            <option value="">Not set</option>
-            <option value="car">Car</option>
-            <option value="bike">Bike</option>
-            <option value="public_transit">Public transport</option>
-            <option value="walk">Walking</option>
-          </select>
-        </div>
-        <div>
-          <Label htmlFor="edit-commute-max">Max one-way commute</Label>
-          <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              id="edit-commute-max"
-              type="number"
-              min={1}
-              value={form.commuteMaxMinutes}
-              onChange={(e) => update("commuteMaxMinutes", e.target.value)}
-              placeholder="30"
-              disabled={form.commuteNoLimit || form.commuteHomeBaseOnly}
-              className="sm:max-w-[8rem]"
-            />
-            <label className="flex items-center gap-2 text-sm text-zinc-600">
-              <input
-                type="checkbox"
-                checked={form.commuteNoLimit}
-                disabled={form.commuteHomeBaseOnly}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    commuteNoLimit: e.target.checked,
-                    commuteHomeBaseOnly: e.target.checked
-                      ? false
-                      : prev.commuteHomeBaseOnly,
-                    commuteMaxMinutes: e.target.checked
-                      ? ""
-                      : prev.commuteMaxMinutes,
-                  }))
-                }
-                className="rounded border-zinc-300"
-              />
-              No limit
-            </label>
+
+        {resume && (
+          <div className="sm:col-span-2 border-t border-zinc-100 pt-4">
+            <p className="text-sm font-medium text-zinc-900">Resume</p>
+            <p className="text-xs text-zinc-500">
+              Upload a CV anytime — AI re-extracts skills and your career
+              ladder.
+            </p>
+
+            {profile.resume ? (
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <FileText className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
+                  <div className="text-sm">
+                    <p className="font-medium">{profile.resume.fileName}</p>
+                    <p className="text-zinc-500">
+                      Uploaded{" "}
+                      {new Date(profile.resume.uploadedAt).toLocaleDateString()}
+                    </p>
+                    {resume.hasRawResume && (
+                      <p className="mt-1 text-emerald-600">
+                        Resume text ingested
+                      </p>
+                    )}
+                    {resume.hasAiSummary && (
+                      <p className="text-violet-600">AI summary available</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1 self-start">
+                  <Button
+                    variant="ghost"
+                    className="px-2 text-zinc-500 hover:text-zinc-900"
+                    disabled={resumeBusy}
+                    onClick={() => resume.onDownload()}
+                    aria-label="Download resume"
+                  >
+                    {resume.downloading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-2 text-zinc-500 hover:text-red-600"
+                    disabled={resumeBusy}
+                    onClick={() => resume.onDelete()}
+                    aria-label="Remove resume"
+                  >
+                    {resume.deleting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-zinc-500">No resume uploaded</p>
+            )}
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer">
+                <input
+                  type="file"
+                  className="hidden"
+                  accept={RESUME_ACCEPT}
+                  disabled={resumeBusy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    e.target.value = "";
+                    resume.onUpload(file);
+                  }}
+                />
+                <span
+                  className={`inline-flex items-center rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium transition-colors ${
+                    resumeBusy
+                      ? "cursor-not-allowed opacity-50"
+                      : "hover:bg-zinc-50"
+                  }`}
+                >
+                  {resume.uploading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  {resume.uploading
+                    ? "Uploading…"
+                    : profile.resume
+                      ? "Replace resume"
+                      : "Upload resume"}
+                </span>
+              </label>
+              <p className="text-xs text-zinc-400">{resumeFileTypeLabel()}</p>
+            </div>
           </div>
-          <p className="mt-1 text-xs text-zinc-500">
-            {form.commuteHomeBaseOnly
-              ? "Home base only is on — commute minutes are not used."
-              : "Jobs beyond this one-way commute are hidden. Set home + mode + minutes, or choose no limit."}
+        )}
+
+        {coverLetters && (
+          <div className="sm:col-span-2 border-t border-zinc-100 pt-4">
+            <p className="text-sm font-medium text-zinc-900">Cover letters</p>
+            <p className="text-xs text-zinc-500">
+              Past letters as style references — AI writes a new one per job
+              using your voice, not a copy of these samples.
+            </p>
+
+            <div className="mt-3 space-y-2">
+              {(profile.coverLetters ?? []).length === 0 ? (
+                <p className="text-sm text-zinc-500">
+                  No cover letter samples yet
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {(profile.coverLetters ?? []).map((letter) => (
+                    <li
+                      key={letter.id}
+                      className="flex flex-col gap-2 rounded-lg border border-zinc-100 px-3 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
+                    >
+                      <div className="flex min-w-0 items-start gap-2">
+                        <FileText className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
+                        <div className="min-w-0 text-sm">
+                          <p className="truncate font-medium">
+                            {letter.fileName}
+                          </p>
+                          <p className="text-zinc-500">
+                            Uploaded{" "}
+                            {new Date(letter.uploadedAt).toLocaleDateString()}
+                            {letter.rawText?.trim()
+                              ? " · text ready"
+                              : " · text extraction pending"}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        className="shrink-0 px-2 text-zinc-500 hover:text-red-600"
+                        disabled={coverLetters.deletingId === letter.id}
+                        onClick={() => coverLetters.onDelete(letter.id)}
+                        aria-label={`Remove ${letter.fileName}`}
+                      >
+                        {coverLetters.deletingId === letter.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex cursor-pointer">
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept={RESUME_ACCEPT}
+                    disabled={
+                      coverLetters.uploading ||
+                      (profile.coverLetters?.length ?? 0) >= 5
+                    }
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      e.target.value = "";
+                      coverLetters.onUpload(file);
+                    }}
+                  />
+                  <span
+                    className={`inline-flex items-center rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium transition-colors ${
+                      coverLetters.uploading ||
+                      (profile.coverLetters?.length ?? 0) >= 5
+                        ? "cursor-not-allowed opacity-50"
+                        : "hover:bg-zinc-50"
+                    }`}
+                  >
+                    {coverLetters.uploading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="mr-2 h-4 w-4" />
+                    )}
+                    {coverLetters.uploading
+                      ? "Uploading…"
+                      : "Upload cover letter"}
+                  </span>
+                </label>
+                <p className="text-xs text-zinc-400">PDF or Word · up to 5</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="sm:col-span-2 border-t border-zinc-100 pt-4">
+          <p className="text-sm font-medium text-zinc-900">Links &amp; sites</p>
+          <p className="text-xs text-zinc-500">
+            Used to enrich your profile when we analyze LinkedIn and portfolios.
           </p>
-        </div>
-        <div className="sm:col-span-2">
-          <Label htmlFor="edit-job-prefs">What type of job do you want?</Label>
-          <textarea
-            id="edit-job-prefs"
-            value={form.jobPreferences}
-            onChange={(e) => update("jobPreferences", e.target.value)}
-            placeholder="e.g. Full-time, remote, frontend roles in the Netherlands. Open to hybrid in Amsterdam."
-            rows={3}
-            className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-base sm:py-2 sm:text-sm"
-          />
-          <p className="mt-1 text-xs text-zinc-500">
-            Used by AI during job search and matching — employment type, location,
-            remote policy, industry, seniority, etc.
-          </p>
-        </div>
-        <div className="sm:col-span-2">
-          <Label htmlFor="edit-country">
-            Country (used for LinkedIn & Indeed job search)
-          </Label>
-          <Input
-            id="edit-country"
-            value={form.preferredCountry}
-            onChange={(e) => update("preferredCountry", e.target.value)}
-            placeholder="Netherlands"
-            className="mt-1"
-          />
         </div>
         <div>
           <Label htmlFor="edit-linkedin">LinkedIn URL</Label>
@@ -357,6 +443,17 @@ export function ProfileDetailsCard({
             placeholder="https://linkedin.com/in/..."
             className="mt-1"
           />
+          {form.linkedInUrl.trim() && resume && (
+            <p
+              className={`mt-1 text-xs ${
+                resume.linkedInIngested ? "text-emerald-600" : "text-amber-700"
+              }`}
+            >
+              {resume.linkedInIngested
+                ? "LinkedIn profile ingested — used for job matching"
+                : "Not ingested yet — click Re-analyze (sign in via Apply once if LinkedIn blocks guests)"}
+            </p>
+          )}
         </div>
         <div>
           <Label htmlFor="edit-github">GitHub URL</Label>

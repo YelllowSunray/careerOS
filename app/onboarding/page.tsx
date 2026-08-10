@@ -172,14 +172,31 @@ export default function OnboardingPage() {
               />
             </div>
             <div>
-              <Label htmlFor="country">Country (for job search on LinkedIn & Indeed)</Label>
+              <Label htmlFor="country">
+                Job search location (LinkedIn &amp; Indeed)
+              </Label>
               <Input
                 id="country"
                 value={preferredCountry}
                 onChange={(e) => setPreferredCountry(e.target.value)}
-                placeholder="Netherlands"
+                placeholder="Netherlands — or Everywhere"
                 required
               />
+              <label className="mt-2 inline-flex items-center gap-2 text-sm text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={/^everywhere$/i.test(preferredCountry.trim())}
+                  onChange={(e) =>
+                    setPreferredCountry(e.target.checked ? "Everywhere" : "")
+                  }
+                  className="h-4 w-4 rounded border-zinc-300"
+                />
+                Search everywhere (all countries)
+              </label>
+              <p className="mt-1 text-xs text-zinc-500">
+                Pick a country to focus search, or Everywhere for worldwide
+                listings. You can change this later on Profile.
+              </p>
             </div>
             <div>
               <Label>Work preference</Label>

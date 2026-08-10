@@ -136,7 +136,14 @@ export function formatContextForPrompt(ctx: CandidateContext, maxChars = 20000):
     ctx.profile.phoneNumber ? `Phone: ${ctx.profile.phoneNumber}` : "",
     ctx.profile.linkedInUrl ? `LinkedIn: ${ctx.profile.linkedInUrl}` : "",
     ctx.profile.githubUrl ? `GitHub: ${ctx.profile.githubUrl}` : "",
-    `Preferred country: ${getPrimaryCountry(ctx.profile.preferredCountries) ?? "not set"}`,
+    `Preferred country: ${
+      (() => {
+        const c = getPrimaryCountry(ctx.profile.preferredCountries);
+        if (!c) return "not set";
+        if (c === "Worldwide") return "Everywhere (all countries)";
+        return c;
+      })()
+    }`,
     `Work preference: ${formatWorkPreferences(normalizeWorkPreferences(ctx.profile))}`,
     (ctx.profile.languagesSpoken ?? []).length > 0
       ? `Languages spoken: ${(ctx.profile.languagesSpoken ?? []).join(", ")}`

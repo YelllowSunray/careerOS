@@ -6,9 +6,14 @@ import { useApi } from "@/lib/hooks/use-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
-import type { CareerIntent, SearchStrategy } from "@/lib/types";
+import type {
+  CareerChatMessage,
+  CareerConversation,
+  CareerIntent,
+  SearchStrategy,
+} from "@/lib/types";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = CareerChatMessage;
 
 export default function IntakePage() {
   const { apiFetch } = useApi();
@@ -16,9 +21,12 @@ export default function IntakePage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [hydrating, setHydrating] = useState(true);
   const [error, setError] = useState("");
   const [draftIntent, setDraftIntent] = useState<CareerIntent | null>(null);
-  const [draftStrategy, setDraftStrategy] = useState<SearchStrategy | null>(null);
+  const [draftStrategy, setDraftStrategy] = useState<SearchStrategy | null>(
+    null
+  );
   const [complete, setComplete] = useState(false);
   const started = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -30,7 +38,42 @@ export default function IntakePage() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    void sendTurn([]);
+
+    async function hydrate() {
+      setHydrating(true);
+      setError("");
+      try {
+        const data = await apiFetch<{
+          careerConversation: CareerConversation | null;
+        }>("/api/intake/chat");
+        const saved = data.careerConversation;
+        const savedMessages = saved?.messages ?? [];
+
+        if (savedMessages.length > 0) {
+          setMessages(savedMessages);
+          if (saved?.draftIntent) setDraftIntent(saved.draftIntent);
+          if (saved?.draftStrategy) setDraftStrategy(saved.draftStrategy);
+          if (
+            saved?.awaitingConfirm &&
+            saved.draftIntent &&
+            saved.draftStrategy
+          ) {
+            setComplete(true);
+          }
+          return;
+        }
+
+        await sendTurn([]);
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Failed to load conversation"
+        );
+      } finally {
+        setHydrating(false);
+      }
+    }
+
+    void hydrate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -43,6 +86,7 @@ export default function IntakePage() {
         isComplete: boolean;
         careerIntent?: CareerIntent;
         searchStrategy?: SearchStrategy;
+        careerConversation?: CareerConversation;
       }>("/api/intake/chat", {
         method: "POST",
         body: JSON.stringify({ action: "chat", messages: nextMessages }),
@@ -50,8 +94,11 @@ export default function IntakePage() {
       const assistant: Msg = {
         role: "assistant",
         content: result.assistantMessage,
+        at: new Date().toISOString(),
       };
-      setMessages([...nextMessages, assistant]);
+      const withAssistant =
+        result.careerConversation?.messages ?? [...nextMessages, assistant];
+      setMessages(withAssistant);
       if (result.careerIntent) setDraftIntent(result.careerIntent);
       if (result.searchStrategy) setDraftStrategy(result.searchStrategy);
       if (result.isComplete && result.careerIntent && result.searchStrategy) {
@@ -63,6 +110,7 @@ export default function IntakePage() {
       setError(e instanceof Error ? e.message : "Intake failed");
     } finally {
       setLoading(false);
+      setHydrating(false);
     }
   }
 
@@ -70,9 +118,13 @@ export default function IntakePage() {
     e.preventDefault();
     const text = input.trim();
     if (!text || loading) return;
-    const next: Msg[] = [...messages, { role: "user", content: text }];
+    const next: Msg[] = [
+      ...messages,
+      { role: "user", content: text, at: new Date().toISOString() },
+    ];
     setMessages(next);
     setInput("");
+    setComplete(false);
     await sendTurn(next);
   }
 
@@ -111,19 +163,51 @@ export default function IntakePage() {
     }
   }
 
+  async function handleStartFresh() {
+    if (
+      !confirm(
+        "Start a new career conversation? Your previous chat transcript will be cleared. Confirmed Intent/Strategy on your profile stay unless you change them later."
+      )
+    ) {
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      await apiFetch("/api/intake/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "clear" }),
+      });
+      setMessages([]);
+      setDraftIntent(null);
+      setDraftStrategy(null);
+      setComplete(false);
+      await sendTurn([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reset chat");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
       <Card>
         <CardTitle>Career conversation</CardTitle>
         <p className="mt-2 text-sm text-zinc-600">
-          Tell us what you want to become — not only what your CV says. We&apos;ll
-          build a Dream / Bridge / Never search strategy together.
+          Tell us what you want to become — not only what your CV says. This
+          chat is saved, so you can close the tab and continue later.
         </p>
 
         <div className="mt-6 max-h-[50vh] space-y-3 overflow-y-auto rounded-lg border border-zinc-100 bg-zinc-50/50 p-3">
+          {hydrating && messages.length === 0 ? (
+            <p className="flex items-center gap-2 text-sm text-zinc-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading conversation…
+            </p>
+          ) : null}
           {messages.map((m, i) => (
             <div
-              key={`${m.role}-${i}`}
+              key={`${m.role}-${i}-${m.at ?? ""}`}
               className={`rounded-lg px-3 py-2 text-sm ${
                 m.role === "assistant"
                   ? "bg-white text-zinc-800"
@@ -147,10 +231,10 @@ export default function IntakePage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type your answer…"
-              disabled={loading}
+              disabled={loading || hydrating}
               className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
             />
-            <Button type="submit" disabled={loading || !input.trim()}>
+            <Button type="submit" disabled={loading || hydrating || !input.trim()}>
               Send
             </Button>
           </form>
@@ -207,7 +291,6 @@ export default function IntakePage() {
                 variant="secondary"
                 onClick={() => {
                   setComplete(false);
-                  setDraftStrategy(null);
                 }}
                 disabled={loading}
               >
@@ -218,14 +301,26 @@ export default function IntakePage() {
         )}
 
         <div className="mt-4 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => void handleSkip()}
-            className="text-xs text-zinc-500 underline hover:text-zinc-800"
-            disabled={loading}
-          >
-            Skip for now
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleSkip()}
+              className="text-xs text-zinc-500 underline hover:text-zinc-800"
+              disabled={loading || hydrating}
+            >
+              Skip for now
+            </button>
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleStartFresh()}
+                className="text-xs text-zinc-500 underline hover:text-zinc-800"
+                disabled={loading || hydrating}
+              >
+                Start fresh
+              </button>
+            )}
+          </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
       </Card>

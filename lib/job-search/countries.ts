@@ -1,5 +1,8 @@
 /** Resolve job search location from profile.preferredCountries (onboarding value). */
 
+/** Canonical value stored when the candidate wants all countries. */
+export const WORLDWIDE_COUNTRY = "Worldwide";
+
 const INDEED_DOMAIN: Record<string, string> = {
   netherlands: "nl",
   nl: "nl",
@@ -49,8 +52,41 @@ const ADZUNA_COUNTRY: Record<string, string> = {
   ireland: "ie",
 };
 
+/** True for Everywhere / Worldwide / Global / all countries aliases. */
+export function isWorldwideAlias(raw: string): boolean {
+  const s = raw.trim().toLowerCase().replace(/[_-]+/g, " ");
+  return (
+    s === "worldwide" ||
+    s === "world wide" ||
+    s === "everywhere" ||
+    s === "global" ||
+    s === "anywhere" ||
+    s === "world" ||
+    s === "all" ||
+    s === "any" ||
+    s === "all countries" ||
+    s === "any country" ||
+    s === "all countries worldwide" ||
+    s === "international"
+  );
+}
+
+export function isWorldwideSearch(countries: string[] | null | undefined): boolean {
+  if (!countries || countries.length === 0) return false;
+  return countries.some((c) => isWorldwideAlias(String(c ?? "")));
+}
+
+/** Form display: show friendly "Everywhere" when stored as Worldwide. */
+export function preferredCountryToForm(countries: string[]): string {
+  const first = countries[0]?.trim() ?? "";
+  if (!first) return "";
+  if (isWorldwideAlias(first)) return "Everywhere";
+  return first;
+}
+
 /** First non-empty country from profile — skips legacy "remote" entries.
  *  Also unwraps comma-separated blobs like "Africa, Asia, The Netherlands".
+ *  Returns "Worldwide" when the candidate chose everywhere / all countries.
  */
 export function getPrimaryCountry(countries: string[]): string | null {
   const tokens: string[] = [];
@@ -63,6 +99,8 @@ export function getPrimaryCountry(countries: string[]): string | null {
     }
   }
   if (tokens.length === 0) return null;
+
+  if (tokens.some(isWorldwideAlias)) return WORLDWIDE_COUNTRY;
 
   // Prefer a concrete board-supported country over continents.
   const preferred = tokens.find((t) => {
@@ -81,31 +119,36 @@ export function getPrimaryCountry(countries: string[]): string | null {
   }
 
   // Drop bare continents — they break LinkedIn location search.
+  // (Worldwide is handled above; do not treat it as a continent.)
   const nonContinent = tokens.find(
-    (t) => !/^(africa|asia|europe|eu|worldwide|global)$/i.test(t.trim())
+    (t) => !/^(africa|asia|europe|eu)$/i.test(t.trim())
   );
   return nonContinent ?? null;
 }
 
 export function normalizePreferredCountries(input: string): string[] {
   const country = input.trim();
-  return country ? [country] : [];
+  if (!country) return [];
+  if (isWorldwideAlias(country)) return [WORLDWIDE_COUNTRY];
+  return [country];
 }
 
-/** LinkedIn/Indeed location param — uses profile country verbatim. */
+/** LinkedIn location param — Worldwide when no country or everywhere mode. */
 export function resolveLinkedInLocation(
   countries: string[],
   workPreference: string
 ): string {
   const country = getPrimaryCountry(countries);
-  if (country) return country;
-  if (workPreference === "remote") return "Worldwide";
-  return "Worldwide";
+  if (country && !isWorldwideAlias(country)) return country;
+  if (workPreference === "remote" || !country || isWorldwideAlias(country ?? "")) {
+    return WORLDWIDE_COUNTRY;
+  }
+  return WORLDWIDE_COUNTRY;
 }
 
 export function resolveIndeedDomain(countries: string[]): string {
   const country = getPrimaryCountry(countries);
-  if (!country) return "www";
+  if (!country || isWorldwideAlias(country)) return "www";
   const key = country.toLowerCase();
   if (INDEED_DOMAIN[key]) return INDEED_DOMAIN[key];
   for (const [name, domain] of Object.entries(INDEED_DOMAIN)) {
@@ -114,14 +157,16 @@ export function resolveIndeedDomain(countries: string[]): string {
   return "www";
 }
 
-/** Indeed `l=` param — profile country as entered (city or country). */
+/** Indeed `l=` param — null means no location filter (everywhere). */
 export function resolveIndeedLocation(countries: string[]): string | null {
-  return getPrimaryCountry(countries);
+  const country = getPrimaryCountry(countries);
+  if (!country || isWorldwideAlias(country)) return null;
+  return country;
 }
 
 export function resolveAdzunaCountryCode(countries: string[]): string {
   const country = getPrimaryCountry(countries);
-  if (!country) return "us";
+  if (!country || isWorldwideAlias(country)) return "us";
   const key = country.toLowerCase();
   if (ADZUNA_COUNTRY[key]) return ADZUNA_COUNTRY[key];
   for (const [name, code] of Object.entries(ADZUNA_COUNTRY)) {

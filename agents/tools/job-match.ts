@@ -84,7 +84,10 @@ function buildHolisticMatchPrompt(
   const workPref = formatWorkPreferences(
     normalizeWorkPreferences(context.profile)
   );
-  const countries = getPrimaryCountry(context.profile.preferredCountries) ?? "any";
+  const countries =
+    getPrimaryCountry(context.profile.preferredCountries) ?? "any";
+  const locationLabel =
+    countries === "Worldwide" ? "Everywhere (all countries)" : countries;
   const jobPrefs = context.profile.jobPreferences?.trim();
   const spoken = (context.profile.languagesSpoken ?? []).filter(Boolean);
   const targetLevel = inferExperienceLevelFromContext(context);
@@ -118,7 +121,7 @@ Interpret sector/role lines as soft bias on contribution & learning — never ha
     : `
 No free-text job preferences.
 Work preference: ${workPref}
-Preferred locations: ${countries}
+Preferred locations: ${locationLabel}
 Set preferencesMatch=true and preferenceAlignment="No specific job preferences stated."`;
 
   const targetRolesBlock = formatTargetRolesForPrompt(context.profile);

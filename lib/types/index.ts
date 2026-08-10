@@ -114,6 +114,8 @@ export interface UserProfile {
   careerIntent?: CareerIntent;
   /** Confirmed dream / bridge / never search lanes. */
   searchStrategy?: SearchStrategy;
+  /** Saved Career chat transcript so the conversation survives tab close. */
+  careerConversation?: CareerConversation;
   /** Languages the candidate speaks (e.g. English, Dutch). Used as a hard job-eligibility filter. */
   languagesSpoken?: string[];
   /** Home base for commute screening (city or address, e.g. "Baarn, Netherlands"). */
@@ -235,6 +237,25 @@ export interface SearchStrategy {
   bridge: string[];
   never: string[];
   confirmedAt: string;
+}
+
+/** One turn in Career chat (persisted on the profile). */
+export interface CareerChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  at?: string;
+}
+
+/** Ongoing Career conversation — survives tab close / return visits. */
+export interface CareerConversation {
+  messages: CareerChatMessage[];
+  updatedAt: string;
+  /** Latest AI draft Intent (before or after confirm). */
+  draftIntent?: CareerIntent;
+  /** Latest AI draft Strategy card. */
+  draftStrategy?: SearchStrategy;
+  /** True when the AI offered a strategy card awaiting confirm. */
+  awaitingConfirm?: boolean;
 }
 
 /** Near-term next role (~0–18 months) or stretch (~1–2 years). */

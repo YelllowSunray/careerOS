@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardTitle } from "@/components/ui/card";
+import { AiUsageCard } from "@/components/settings/ai-usage-card";
+import type { AiUsageRecord } from "@/lib/types/ai-usage";
 import {
   API_JOB_BOARDS,
   PLAYWRIGHT_JOB_BOARDS,
@@ -70,6 +72,8 @@ export default function SettingsPage() {
   const [careerUrls, setCareerUrls] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [aiUsage, setAiUsage] = useState<AiUsageRecord | null>(null);
+  const [aiUsageLoading, setAiUsageLoading] = useState(true);
 
   useEffect(() => {
     apiFetch("/api/profile")
@@ -84,6 +88,11 @@ export default function SettingsPage() {
         setCareerUrls(urlsToLines(p?.settings?.careerPageUrls));
       })
       .catch(() => {});
+
+    apiFetch("/api/data?type=ai-usage")
+      .then((u: AiUsageRecord | null) => setAiUsage(u))
+      .catch(() => setAiUsage(null))
+      .finally(() => setAiUsageLoading(false));
   }, [apiFetch]);
 
   async function handleSave() {
@@ -269,6 +278,8 @@ export default function SettingsPage() {
           LinkedIn job search is enabled above. Your LinkedIn profile URL on Profile is crawled on Re-analyze and used for job matching alongside your resume and portfolio.
         </p>
       </Card>
+
+      <AiUsageCard aiUsage={aiUsage} loading={aiUsageLoading} />
     </div>
   );
 }

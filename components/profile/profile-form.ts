@@ -3,21 +3,29 @@ import {
   commuteMaxMinutesToForm,
   parseCommuteMaxMinutesFromForm,
 } from "@/lib/commute/helpers";
-import { normalizePreferredCountries } from "@/lib/job-search/countries";
+import {
+  normalizePreferredCountries,
+  preferredCountryToForm,
+} from "@/lib/job-search/countries";
 import { normalizeWorkPreferences } from "@/lib/job-search/work-preference";
 
-export interface ProfileFormValues {
+/** Who you are — Profile details card. */
+export interface IdentityFormValues {
   name: string;
   email: string;
   phoneNumber: string;
   linkedInUrl: string;
   githubUrl: string;
   portfolioUrls: string;
+  /** Comma-separated language names */
+  languagesSpoken: string;
+}
+
+/** How/where you want to search — Career intent card. */
+export interface JobSearchFormValues {
   preferredCountry: string;
   workPreferences: WorkArrangement[];
   jobPreferences: string;
-  /** Comma-separated language names */
-  languagesSpoken: string;
   homeLocation: string;
   commuteMode: CommuteMode | "";
   commuteMaxMinutes: string;
@@ -25,6 +33,9 @@ export interface ProfileFormValues {
   /** Only show jobs in the home-base city (stores commuteMaxMinutes = 0). */
   commuteHomeBaseOnly: boolean;
 }
+
+/** @deprecated Prefer IdentityFormValues + JobSearchFormValues */
+export type ProfileFormValues = IdentityFormValues & JobSearchFormValues;
 
 export function parseLanguagesSpoken(raw: string): string[] {
   return [
@@ -38,11 +49,10 @@ export function parseLanguagesSpoken(raw: string): string[] {
   ];
 }
 
-export function profileToFormValues(
+export function profileToIdentityForm(
   profile: UserProfile,
   phone?: string
-): ProfileFormValues {
-  const commuteForm = commuteMaxMinutesToForm(profile.commuteMaxMinutes);
+): IdentityFormValues {
   return {
     name: profile.name,
     email: profile.email,
@@ -50,10 +60,40 @@ export function profileToFormValues(
     linkedInUrl: profile.linkedInUrl ?? "",
     githubUrl: profile.githubUrl ?? "",
     portfolioUrls: profile.portfolioUrls.join(", "),
-    preferredCountry: profile.preferredCountries[0] ?? "",
+    languagesSpoken: (profile.languagesSpoken ?? []).join(", "),
+  };
+}
+
+export function identityFormToUpdate(
+  values: IdentityFormValues,
+  existing: UserProfile
+): Partial<UserProfile> {
+  const languages = parseLanguagesSpoken(values.languagesSpoken);
+  return {
+    name: values.name.trim(),
+    email: values.email.trim(),
+    phoneNumber: values.phoneNumber.trim() || undefined,
+    linkedInUrl: values.linkedInUrl.trim() || undefined,
+    githubUrl: values.githubUrl.trim() || undefined,
+    portfolioUrls: values.portfolioUrls
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean),
+    languagesSpoken: languages.length > 0 ? languages : [],
+    onboardingComplete: existing.onboardingComplete,
+    settings: existing.settings,
+    resume: existing.resume,
+  };
+}
+
+export function profileToJobSearchForm(
+  profile: UserProfile
+): JobSearchFormValues {
+  const commuteForm = commuteMaxMinutesToForm(profile.commuteMaxMinutes);
+  return {
+    preferredCountry: preferredCountryToForm(profile.preferredCountries),
     workPreferences: normalizeWorkPreferences(profile),
     jobPreferences: profile.jobPreferences ?? "",
-    languagesSpoken: (profile.languagesSpoken ?? []).join(", "),
     homeLocation: profile.homeLocation ?? "",
     commuteMode: profile.commuteMode ?? "",
     commuteMaxMinutes: commuteForm.minutes,
@@ -62,11 +102,10 @@ export function profileToFormValues(
   };
 }
 
-export function formValuesToProfileUpdate(
-  values: ProfileFormValues,
+export function jobSearchFormToUpdate(
+  values: JobSearchFormValues,
   existing: UserProfile
 ): Partial<UserProfile> {
-  const languages = parseLanguagesSpoken(values.languagesSpoken);
   const homeLocation = values.homeLocation.trim() || undefined;
   const commuteMode = values.commuteMode || undefined;
   const parsedMax = parseCommuteMaxMinutesFromForm(
@@ -82,24 +121,33 @@ export function formValuesToProfileUpdate(
       : undefined;
 
   return {
-    name: values.name.trim(),
-    email: values.email.trim(),
-    phoneNumber: values.phoneNumber.trim() || undefined,
-    linkedInUrl: values.linkedInUrl.trim() || undefined,
-    githubUrl: values.githubUrl.trim() || undefined,
-    portfolioUrls: values.portfolioUrls
-      .split(",")
-      .map((u) => u.trim())
-      .filter(Boolean),
     preferredCountries: normalizePreferredCountries(values.preferredCountry),
     workPreferences: values.workPreferences,
     jobPreferences: values.jobPreferences.trim() || undefined,
-    languagesSpoken: languages.length > 0 ? languages : [],
     homeLocation,
     commuteMode,
     commuteMaxMinutes,
-    onboardingComplete: existing.onboardingComplete,
-    settings: existing.settings,
-    resume: existing.resume,
+  };
+}
+
+/** @deprecated Use profileToIdentityForm + profileToJobSearchForm */
+export function profileToFormValues(
+  profile: UserProfile,
+  phone?: string
+): ProfileFormValues {
+  return {
+    ...profileToIdentityForm(profile, phone),
+    ...profileToJobSearchForm(profile),
+  };
+}
+
+/** @deprecated Use identityFormToUpdate / jobSearchFormToUpdate */
+export function formValuesToProfileUpdate(
+  values: ProfileFormValues,
+  existing: UserProfile
+): Partial<UserProfile> {
+  return {
+    ...identityFormToUpdate(values, existing),
+    ...jobSearchFormToUpdate(values, existing),
   };
 }

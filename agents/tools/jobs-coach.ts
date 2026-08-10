@@ -6,6 +6,10 @@ import type { CareerIntent, SearchStrategy } from "@/lib/types";
 import { nowIso } from "@/lib/utils/dates";
 import { ETHOS_AGENT_BLOCK } from "@/lib/career/ethos";
 import { formatCareerIntentForPrompt } from "@/lib/job-search/career-intent";
+import {
+  coerceStretchTolerance,
+  coerceWorkSetting,
+} from "@/lib/job-search/career-intent";
 
 const coachSchema = z.object({
   diagnosis: z.string(),
@@ -28,6 +32,74 @@ const coachSchema = z.object({
     })
     .optional(),
 });
+
+function asStringList(raw: unknown, max = 12): string[] {
+  if (raw == null) return [];
+  if (typeof raw === "string") {
+    return raw
+      .split(/[,;\n|]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, max);
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function coerceCoach(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") {
+    return {
+      diagnosis: "",
+      clarifyingQuestion: "",
+      proposedStrategy: { dream: [], bridge: [], never: [] },
+    };
+  }
+  const o = raw as Record<string, unknown>;
+  const strategyRaw =
+    o.proposedStrategy ?? o.proposed_strategy ?? o.strategy;
+  const strategy =
+    strategyRaw && typeof strategyRaw === "object"
+      ? (strategyRaw as Record<string, unknown>)
+      : {};
+  const patchRaw = o.intentPatch ?? o.intent_patch;
+  let intentPatch: Record<string, unknown> | undefined;
+  if (patchRaw && typeof patchRaw === "object") {
+    const p = patchRaw as Record<string, unknown>;
+    const workSetting = coerceWorkSetting(p.workSetting ?? p.work_setting);
+    const stretchTolerance = coerceStretchTolerance(
+      p.stretchTolerance ?? p.stretch_tolerance
+    );
+    intentPatch = {
+      northStar: p.northStar != null ? String(p.northStar) : undefined,
+      narrative: p.narrative != null ? String(p.narrative) : undefined,
+      antiGoals: asStringList(p.antiGoals ?? p.anti_goals),
+      openQuestions: asStringList(p.openQuestions ?? p.open_questions),
+    };
+    if (workSetting) intentPatch.workSetting = workSetting;
+    if (stretchTolerance) intentPatch.stretchTolerance = stretchTolerance;
+    for (const key of Object.keys(intentPatch)) {
+      if (intentPatch[key] === undefined) delete intentPatch[key];
+    }
+  }
+
+  return {
+    diagnosis: String(o.diagnosis ?? o.summary ?? ""),
+    clarifyingQuestion: String(
+      o.clarifyingQuestion ?? o.clarifying_question ?? o.question ?? ""
+    ),
+    proposedStrategy: {
+      dream: asStringList(strategy.dream ?? strategy.dreams, 8),
+      bridge: asStringList(strategy.bridge ?? strategy.bridges, 10),
+      never: asStringList(strategy.never ?? strategy.cliffs, 12),
+    },
+    ...(intentPatch && Object.keys(intentPatch).length > 0
+      ? { intentPatch }
+      : {}),
+  };
+}
 
 export interface JobsCoachResult {
   diagnosis: string;
@@ -81,18 +153,7 @@ ${formatContextForPrompt(input.context, 12000)}`,
     {
       userId: input.context.userId,
       operation: "jobs_coach",
-      coerce: (raw) => {
-        if (!raw || typeof raw !== "object") return raw;
-        const o = raw as Record<string, unknown>;
-        return {
-          diagnosis: String(o.diagnosis ?? o.summary ?? ""),
-          clarifyingQuestion: String(
-            o.clarifyingQuestion ?? o.clarifying_question ?? o.question ?? ""
-          ),
-          proposedStrategy: o.proposedStrategy ?? o.proposed_strategy ?? o.strategy,
-          intentPatch: o.intentPatch ?? o.intent_patch,
-        };
-      },
+      coerce: coerceCoach,
     }
   );
 
