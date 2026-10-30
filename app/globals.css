@@ -55,3 +55,15 @@ body {
 .landing-hero-cta {
   animation: landing-fade-in 900ms ease 180ms both;
 }
+
+.landing-display {
+  font-family: var(--font-landing-display), ui-sans-serif, sans-serif;
+}
+
+.landing-faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-faq summary {
+  list-style: none;
+}
