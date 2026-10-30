@@ -22,23 +22,23 @@ const body = DM_Sans({
 const STEPS = [
   {
     n: "01",
-    title: "Build your career ladder",
-    body: "Upload your CV and optional LinkedIn. Career OS maps where you are now, the next roles that raise your scope, and stretch goals a year out — in Dutch or English.",
+    title: "AI reads your CV and builds the ladder",
+    body: "Upload a CV and optional LinkedIn. The AI extracts the evidence, then maps where you are now, the next roles that raise your scope, and stretch goals a year out — in Dutch or English.",
   },
   {
     n: "02",
     title: "Search where the jobs actually live",
-    body: "We hunt LinkedIn, Indeed, and other boards with keywords tuned to your market — Dutch titles for logistics and care, English for international tech — then keep searching until you pause.",
+    body: "The AI turns that ladder into board queries — Dutch titles for logistics and care, English for international tech. We hunt LinkedIn, Indeed, and other boards, then keep searching until you pause.",
   },
   {
     n: "03",
-    title: "Match on fit, not title clones",
-    body: "Every listing is scored for contribution, learning, pay, and scope step-up. Language, skills, and commute gates keep noise out of your feed.",
+    title: "AI scores matches",
+    body: "Each listing is scored for contribution, learning, pay, and scope step-up — not title clones. Language, skills, and commute gates keep noise out of your feed.",
   },
   {
     n: "04",
-    title: "Apply with letters that fit the brief",
-    body: "Generate cover letters in English or Dutch from the live job posting — grounded in your CV and written in your voice.",
+    title: "AI writes letters",
+    body: "Cover letters are drafted in English or Dutch from the live job posting — grounded in your CV and written in your voice.",
   },
 ] as const;
 
@@ -105,9 +105,14 @@ export function LandingPage() {
 
         <div className="relative z-10 mx-auto flex min-h-[100svh] max-w-6xl flex-col justify-end px-5 pb-16 pt-28 sm:px-8 sm:pb-24 sm:pt-32">
           <div className="landing-hero-copy max-w-3xl">
-            <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-white/70">
-              Nederlands · English
-            </p>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full border border-[#149c7f]/55 bg-[#149c7f]/20 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-white">
+                AI career agent
+              </span>
+              <span className="text-sm font-semibold uppercase tracking-[0.18em] text-white/70">
+                Nederlands · English
+              </span>
+            </div>
             <p className="landing-display mb-4 text-4xl font-extrabold tracking-tight text-white sm:text-6xl md:text-7xl">
               Career OS
             </p>
@@ -116,9 +121,9 @@ export function LandingPage() {
               language Dutch jobs are actually posted in
             </h1>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-white/75 sm:text-lg">
-              Upload a CV. Career OS maps the next rung, hunts Dutch and
-              English listings the way boards actually index them, scores fit,
-              and writes cover letters that match the vacature.
+              An AI career agent that reads your CV, maps the next rung, hunts
+              Dutch and English listings the way boards actually index them,
+              scores fit, and writes cover letters that match the vacature.
             </p>
           </div>
           <div className="landing-hero-cta mt-8 flex flex-wrap items-center gap-3">
@@ -197,6 +202,10 @@ export function LandingPage() {
             <h2 className="landing-display mt-3 max-w-xl text-3xl font-bold tracking-tight sm:text-4xl">
               From knowledge graph to applications
             </h2>
+            <p className="mt-4 max-w-2xl text-base leading-relaxed text-white/65 sm:text-lg">
+              Gemini reads the CV, builds the ladder, scores matches, and
+              writes letters. You stay in control of pause and apply.
+            </p>
           </Reveal>
           <ol className="mt-14 space-y-12 sm:space-y-16">
             {STEPS.map((step, i) => (
