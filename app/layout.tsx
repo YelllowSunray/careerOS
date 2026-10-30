@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Career OS — AI Career Agent",
+  title: "Career OS — AI career agent",
   description:
-    "Find your dream job in Dutch and English. Career OS builds your career ladder, searches local and international listings, and helps you apply with tailored cover letters.",
+    "An AI career agent for the Dutch market. Find the next step on your career ladder — searched in the language Dutch jobs are actually posted in. Gemini reads your CV, maps the ladder, scores listings, and writes cover letters.",
 };
 
 export const viewport = {

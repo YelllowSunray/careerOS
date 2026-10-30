@@ -23,6 +23,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [user, loading, pathname, router]);
 
   if (loading) {
+    // Public marketing + auth pages should paint immediately; dashboard stays gated.
+    if (PUBLIC_PATHS.has(pathname)) {
+      return <>{children}</>;
+    }
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900" />
